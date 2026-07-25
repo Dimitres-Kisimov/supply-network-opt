@@ -114,5 +114,5 @@ tests/            19 tests (data, facility, flow, safety stock, exports)
 docs/BUSINESS_CASE.md
 ```
 
-MIT licensed. See `docs/BUSINESS_CASE.md` for the framed business case and
+© 2026 Dimitres Kisimov — all rights reserved; published for portfolio review. See LICENSE. See `docs/BUSINESS_CASE.md` for the framed business case and
 `CREDITS.md` for the tools this is built on.
