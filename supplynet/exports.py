@@ -19,6 +19,7 @@ from matplotlib.backends.backend_pdf import PdfPages  # noqa: E402
 from openpyxl import Workbook  # noqa: E402
 from openpyxl.styles import Font  # noqa: E402
 
+from supplynet.co2_sensitivity import to_csv, to_svg, tradeoff_readout  # noqa: E402
 from supplynet.pipeline import PipelineResult, run_pipeline  # noqa: E402
 
 DISCLAIMER = (
@@ -187,6 +188,55 @@ def _pooling_chart(pdf: PdfPages, r: PipelineResult) -> None:
     plt.close(fig)
 
 
+def _co2_pareto(pdf: PdfPages, r: PipelineResult) -> None:
+    fig, ax = plt.subplots(figsize=(11, 8.5))
+    s = r.co2
+
+    # Pareto frontier connector (sorted by cost).
+    front = sorted(s.pareto, key=lambda d: d.cost)
+    if len(front) >= 2:
+        ax.plot([d.cost for d in front], [d.co2_t for d in front],
+                color="#1f9d55", linestyle="--", linewidth=1.5, zorder=1,
+                label="Pareto frontier")
+
+    for d in s.designs:
+        color = "#1f9d55" if d.is_pareto else "#c44e52"
+        ax.scatter(d.cost, d.co2_t, s=140 if d is s.cost_optimal else 90,
+                   c=color, edgecolors="#222222", zorder=3)
+        ax.annotate(f"{d.n_dc} DCs", (d.cost, d.co2_t), fontsize=9,
+                    xytext=(6, 6), textcoords="offset points")
+
+    opt = s.cost_optimal
+    ax.annotate("cost-optimal", (opt.cost, opt.co2_t), fontsize=9,
+                color="#0a4a8b", xytext=(6, -14), textcoords="offset points")
+
+    ax.set_xlabel("Total cost ($) - lower is better")
+    ax.set_ylabel("Modeled outbound CO2 (tonnes) - lower is better")
+    ax.set_title(
+        "Cost vs CO2 by network density (illustrative emission factor)",
+        fontsize=13,
+    )
+    ax.grid(True, linestyle=":", alpha=0.4)
+
+    note = "  ".join([
+        "Point label = number of open DCs.",
+        f"CO2 factor {s.emission_factor_kg_per_tkm:.2f} kg/t-km "
+        f"({s.unit_weight_t:.2f} t/unit) is ILLUSTRATIVE, not certified.",
+    ])
+    read = tradeoff_readout(s)
+    caption = textwrap.fill(read[1], 96) if len(read) > 1 else ""
+    ax.text(0.5, -0.13, note, transform=ax.transAxes, ha="center",
+            fontsize=8, color="#777777")
+    if caption:
+        ax.text(0.5, -0.18, textwrap.fill(caption, 96), transform=ax.transAxes,
+                ha="center", fontsize=9, color="#333333")
+    fig.subplots_adjust(bottom=0.22)
+    if front:
+        ax.legend(loc="upper right", fontsize=9)
+    pdf.savefig(fig)
+    plt.close(fig)
+
+
 def build_pdf(r: PipelineResult, path: str) -> str:
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
     with PdfPages(path) as pdf:
@@ -194,6 +244,7 @@ def build_pdf(r: PipelineResult, path: str) -> str:
         _network_map(pdf, r)
         _cost_breakdown(pdf, r)
         _pooling_chart(pdf, r)
+        _co2_pareto(pdf, r)
         meta = pdf.infodict()
         meta["Title"] = "Supply-Network Optimization (synthetic)"
         meta["Author"] = "Dimitres Kisimov"
@@ -308,6 +359,35 @@ def build_excel(r: PipelineResult, path: str) -> str:
     for col in "ABCDEFG":
         wc.column_dimensions[col].width = 13
 
+    # CO2 sensitivity sheet: cost-optimal design at each network density.
+    wco2 = wb.create_sheet("CO2Sensitivity")
+    s = r.co2
+    wco2["A1"] = "CO2 / cost / service sensitivity (sweep over # open DCs)"
+    wco2["A1"].font = Font(bold=True, size=12)
+    wco2["A2"] = (
+        "Emission factor ILLUSTRATIVE: "
+        f"{s.emission_factor_kg_per_tkm:.2f} kg CO2e/tonne-km, "
+        f"{s.unit_weight_t:.2f} t/unit - NOT a certified figure. Outbound leg only."
+    )
+    hdr = ["n_dcs", "opened", "cost_usd", "co2_tonnes", "avg_delivery_km",
+           f"pct_demand_within_{int(s.service_radius_km)}km", "pareto_optimal"]
+    wco2.append([])
+    wco2.append(hdr)
+    for c in wco2[4]:
+        c.font = bold
+    for d in s.designs:
+        wco2.append([
+            d.n_dc, ", ".join(d.opened), round(d.cost, 2), round(d.co2_t, 4),
+            round(d.avg_delivery_km, 2), round(d.service_within_radius_pct, 2),
+            "yes" if d.is_pareto else "no",
+        ])
+    wco2.append([])
+    for line in tradeoff_readout(s):
+        wco2.append([line])
+    wco2.column_dimensions["A"].width = 16
+    for col in "BCDEFG":
+        wco2.column_dimensions[col].width = 16
+
     # Assignment sheet: opened-DC x customer shipped-units matrix.
     wa = wb.create_sheet("Assignment")
     header = ["dc_id \\ cust", *list(r.data.customers["cust_id"])]
@@ -331,6 +411,12 @@ def write_deliverables(r: PipelineResult | None = None, out_dir: str = "delivera
     os.makedirs(out_dir, exist_ok=True)
     pdf_path = os.path.join(out_dir, "supply_network_report.pdf")
     xlsx_path = os.path.join(out_dir, "supply_network_workbook.xlsx")
+    csv_path = os.path.join(out_dir, "co2_sensitivity.csv")
+    svg_path = os.path.join(out_dir, "co2_cost_frontier.svg")
     build_pdf(r, pdf_path)
     build_excel(r, xlsx_path)
-    return {"pdf": pdf_path, "xlsx": xlsx_path}
+    with open(csv_path, "w", encoding="utf-8", newline="\n") as fh:
+        fh.write(to_csv(r.co2))
+    with open(svg_path, "w", encoding="utf-8", newline="\n") as fh:
+        fh.write(to_svg(r.co2))
+    return {"pdf": pdf_path, "xlsx": xlsx_path, "csv": csv_path, "svg": svg_path}

@@ -6,6 +6,7 @@ Everything downstream (CLI report, PDF, Excel, tests) consumes the single
 
 from dataclasses import dataclass
 
+from supplynet.co2_sensitivity import Co2Sensitivity, run_co2_sensitivity
 from supplynet.data import NetworkData, generate_network
 from supplynet.facility import (
     FacilitySolution,
@@ -25,6 +26,7 @@ class PipelineResult:
     pooling: PoolingResult
     echelon: dict
     service_level: float
+    co2: Co2Sensitivity
 
     @property
     def opened_idx(self) -> list[int]:
@@ -51,6 +53,7 @@ def run_pipeline(seed: int = 42, service_level: float = 0.95) -> PipelineResult:
 
     pooling = pooling_analysis(data, service_level=service_level, assignment=milp.assignment)
     echelon = echelon_safety_stock(data, service_level=service_level)
+    co2 = run_co2_sensitivity(data)
 
     return PipelineResult(
         data=data,
@@ -60,4 +63,5 @@ def run_pipeline(seed: int = 42, service_level: float = 0.95) -> PipelineResult:
         pooling=pooling,
         echelon=echelon,
         service_level=service_level,
+        co2=co2,
     )

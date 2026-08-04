@@ -5,8 +5,9 @@ Modules:
   facility     capacitated facility-location MILP + greedy baseline
   flow         min-cost multi-echelon flow (graph solver + LP cross-check)
   safetystock  multi-echelon safety stock and risk pooling
+  co2_sensitivity  CO2-aware variant + cost/CO2/service sensitivity (Pareto)
   pipeline     end-to-end orchestration
-  exports      executive PDF + Excel deliverables
+  exports      executive PDF + Excel deliverables + CO2 CSV/SVG
 """
 
 from supplynet.pipeline import PipelineResult, run_pipeline

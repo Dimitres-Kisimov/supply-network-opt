@@ -19,8 +19,12 @@ def test_deliverables_written_non_empty(tmp_path):
     paths = write_deliverables(r, out_dir=str(tmp_path))
     pdf = tmp_path / "supply_network_report.pdf"
     xlsx = tmp_path / "supply_network_workbook.xlsx"
-    assert pdf.exists() and xlsx.exists()
-    # Both deliverables must be substantial, not empty stubs.
+    csv = tmp_path / "co2_sensitivity.csv"
+    svg = tmp_path / "co2_cost_frontier.svg"
+    assert pdf.exists() and xlsx.exists() and csv.exists() and svg.exists()
+    # Deliverables must be substantial, not empty stubs.
     assert pdf.stat().st_size > 10_000
     assert xlsx.stat().st_size > 10_000
-    assert set(paths) == {"pdf", "xlsx"}
+    assert csv.stat().st_size > 0
+    assert svg.stat().st_size > 0
+    assert set(paths) == {"pdf", "xlsx", "csv", "svg"}

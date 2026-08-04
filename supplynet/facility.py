@@ -33,10 +33,21 @@ class FacilitySolution:
         return len(self.opened)
 
 
-def solve_facility_milp(data: NetworkData, time_limit_s: float = 30.0) -> FacilitySolution:
+def solve_facility_milp(
+    data: NetworkData,
+    time_limit_s: float = 30.0,
+    n_open: int | None = None,
+) -> FacilitySolution:
     """Solve the capacitated facility-location MILP with CBC.
 
     Returns the optimal (for this instance) set of open DCs and the flow.
+
+    If ``n_open`` is given, the model is constrained to open *exactly* that many
+    DCs (``sum(y) == n_open``). This is what the CO2/sensitivity sweep uses to
+    trace the cost-optimal design at each network density; leaving it ``None``
+    reproduces the unconstrained optimum and is fully backward compatible.
+    Raises ``RuntimeError`` if the constrained model is infeasible (e.g. too few
+    DCs to cover demand).
     """
     n_dc = data.n_dcs
     n_cust = data.n_customers
@@ -64,6 +75,10 @@ def solve_facility_milp(data: NetworkData, time_limit_s: float = 30.0) -> Facili
     # A DC can only ship if it is open, and never above its capacity.
     for i in range(n_dc):
         solver.Add(solver.Sum(x[i, j] for j in range(n_cust)) <= capacity[i] * y[i])
+
+    # Optionally force an exact number of open DCs (used by the sensitivity sweep).
+    if n_open is not None:
+        solver.Add(solver.Sum(y[i] for i in range(n_dc)) == n_open)
 
     solver.Minimize(
         solver.Sum(fixed[i] * y[i] for i in range(n_dc))

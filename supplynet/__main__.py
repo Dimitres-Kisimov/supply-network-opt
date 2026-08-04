@@ -14,6 +14,7 @@ try:
 except (AttributeError, ValueError):
     pass
 
+from supplynet.co2_sensitivity import tradeoff_readout  # noqa: E402
 from supplynet.pipeline import run_pipeline  # noqa: E402
 
 
@@ -53,8 +54,23 @@ def _report(r) -> str:
         f"({r.milp.n_opened} opened DCs)  -{p.network_reduction_pct:.1f}%",
         f"  Fully centralized : {p.centralized:,.0f} units (single DC)  "
         f"-{p.reduction_pct:.1f}%",
-        "=" * 66,
+        "",
+        "-- CO2-aware sensitivity (cost vs CO2 vs last-mile service) --",
+        "  Emission factor is ILLUSTRATIVE "
+        f"({r.co2.emission_factor_kg_per_tkm:.2f} kg CO2e/tonne-km, "
+        f"{r.co2.unit_weight_t:.2f} t/unit), not certified.",
+        f"  {'#DCs':>4}  {'cost($)':>10}  {'CO2(t)':>7}  {'avg km':>7}  "
+        f"{'<=' + str(int(r.co2.service_radius_km)) + 'km%':>7}  pareto",
     ]
+    for pt in r.co2.designs:
+        lines.append(
+            f"  {pt.n_dc:>4}  {pt.cost:>10,.0f}  {pt.co2_t:>7.2f}  "
+            f"{pt.avg_delivery_km:>7.1f}  {pt.service_within_radius_pct:>7.1f}  "
+            f"{'*' if pt.is_pareto else ' '}"
+        )
+    lines.append("")
+    lines.extend("  " + s for s in tradeoff_readout(r.co2))
+    lines.append("=" * 66)
     return "\n".join(lines)
 
 
