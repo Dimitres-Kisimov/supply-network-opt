@@ -79,6 +79,40 @@ own cost objective. Running with `--deliverables` also writes the full frontier
 to `deliverables/co2_sensitivity.csv` and a hand-drawn
 `deliverables/co2_cost_frontier.svg` (cost-vs-CO2 scatter, Pareto highlighted).
 
+## Cheap can be fragile: a disruption-resilience (N-1) screen
+
+The cost-optimal design is *lean* — it opens the fewest DCs that cover demand —
+and lean networks can be fragile. The `resilience` module runs the classic
+**N-1 contingency screen**: knock out each opened DC in turn, re-optimize the
+outbound assignment over the *surviving* committed DCs (a transportation LP that
+allows unmet demand as slack), and read off the fill rate. Where an outage leaves
+demand unserved, it then **re-solves the same facility-location MILP** with the
+survivors forced open and the failed DC forced closed, to find the cheapest
+standby to activate and restore 100% service. Seed 42:
+
+| Lose | Surviving capacity | Fill rate | Unmet units | Recover by | Recovery premium |
+| ---: | ---: | ---: | ---: | :---: | ---: |
+| **DC1** | 10,659 | **59.6%** | 7,221 | +DC5 | **$157,016** |
+| DC4 | 13,116 | 73.4% | 4,764 | +DC3 | $109,247 |
+| DC6 | 15,127 | 84.6% | 2,753 | +DC0 | $84,826 |
+
+The finding is blunt and honest: on seed 42 the cost-optimal 3-DC network is
+**not N-1 resilient** — *every* opened DC is critical, because total demand
+(17,880 units) exceeds any two survivors' capacity. Losing DC1 alone would drop
+service to **59.6%** until a standby is activated. Restoring full service after
+the worst loss costs an added **$157,016** (a standby's fixed cost plus the extra
+transport). That is the resilience premium a planner weighs against the
+$83,550 the lean design *saved* versus the greedy baseline — the flip side of
+the same cost-vs-CO2 tension, now cost-vs-robustness. `--deliverables` adds a
+two-panel resilience page (fill rate + recovery premium per outage) to the PDF
+and a `Resilience` sheet to the workbook.
+
+Honest scope: capacity is the only hard operating limit modeled and demand is
+deterministic, so treat these fill rates as a **planning screen**, not a
+guaranteed service outcome. Recovery re-optimizes strategically (cheapest network
+excluding the failed DC while keeping survivors); a true fast operational failover
+would also model switching time and standing standby cost.
+
 ## How to run it
 
 ```bash
@@ -91,9 +125,10 @@ python -m supplynet --seed 7        # try a different synthetic instance
 
 The deliverables step writes an executive PDF (cover with disclaimer and
 headline savings, a network map of opened DCs and flows, a cost-breakdown bar,
-a safety-stock pooling chart, and a cost-vs-CO2 Pareto page) plus an Excel
-workbook (Summary, Facilities, Flows, SafetyStock, Customers, CO2Sensitivity,
-Assignment) and the CO2 frontier as a CSV and a hand-drawn SVG.
+a safety-stock pooling chart, a cost-vs-CO2 Pareto page, and a disruption-
+resilience page) plus an Excel workbook (Summary, Facilities, Flows, SafetyStock,
+Customers, CO2Sensitivity, Resilience, Assignment) and the CO2 frontier as a CSV
+and a hand-drawn SVG.
 
 Run the checks with `python -m ruff check .` and `python -m pytest -q`.
 
@@ -127,6 +162,17 @@ centralized. These formulas assume normal, independent demand and fixed lead
 times; real demand is neither perfectly normal nor independent, so treat the
 figures as estimates.
 
+**4. Disruption resilience — single-DC-outage (N-1) screen.** For each opened DC,
+I remove it and re-optimize the outbound assignment over the surviving committed
+DCs as a transportation LP (OR-Tools GLOP) with a per-customer slack for unmet
+demand, so the model serves as much as surviving capacity allows and the slack
+reads out as the lost fill rate. Where survivors fall short, I re-solve the same
+capacitated facility MILP with the survivors forced open and the failed DC forced
+closed (two backward-compatible pins added to `solve_facility_milp`) to find the
+cheapest standby to activate; the added fixed cost plus the transport change is
+the recovery premium. This models capacity as the only hard operating limit and
+treats demand as deterministic — a planning screen, not a live-failover SLA.
+
 ## Honesty notes
 
 - Data is synthetic and seeded. No real customers, costs, or locations.
@@ -139,6 +185,9 @@ figures as estimates.
   0.10 t/unit), not a certified one, and count only the outbound leg. Treat them
   as relative comparisons between designs on synthetic data, not absolute
   footprints.
+- The resilience screen models **capacity as the only hard limit** and demand as
+  deterministic; fill rates are a planning screen, not a guaranteed service level,
+  and recovery is a cheapest-redesign estimate, not a timed operational failover.
 
 ## Layout
 
@@ -149,10 +198,11 @@ supplynet/
   flow.py            min-cost multi-echelon flow (graph solver + LP cross-check)
   safetystock.py     base-stock safety stock + risk pooling
   co2_sensitivity.py CO2-aware variant + cost/CO2/service sweep (Pareto frontier)
+  resilience.py      single-DC-outage (N-1) screen + cheapest recovery
   pipeline.py        end-to-end orchestration
   exports.py         executive PDF + Excel workbook + CO2 CSV/SVG
   __main__.py        CLI
-tests/            29 tests (data, facility, flow, safety stock, co2, exports)
+tests/            39 tests (data, facility, flow, safety stock, co2, resilience, exports)
 docs/BUSINESS_CASE.md
 ```
 

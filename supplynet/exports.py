@@ -21,6 +21,7 @@ from openpyxl.styles import Font  # noqa: E402
 
 from supplynet.co2_sensitivity import to_csv, to_svg, tradeoff_readout  # noqa: E402
 from supplynet.pipeline import PipelineResult, run_pipeline  # noqa: E402
+from supplynet.resilience import resilience_readout  # noqa: E402
 
 DISCLAIMER = (
     "All data in this report is SYNTHETIC and generated from a fixed random seed. "
@@ -237,6 +238,48 @@ def _co2_pareto(pdf: PdfPages, r: PipelineResult) -> None:
     plt.close(fig)
 
 
+def _resilience_chart(pdf: PdfPages, r: PipelineResult) -> None:
+    fig, (ax_fill, ax_prem) = plt.subplots(1, 2, figsize=(11, 8.5))
+    res = r.resilience
+    labels = [f"lose {s.failed_dc}" for s in res.scenarios]
+    fills = [s.fill_rate_pct for s in res.scenarios]
+    premiums = [s.recovery_premium for s in res.scenarios]
+
+    # Left: surviving fill rate per single-DC outage (100% = fully resilient).
+    colors = ["#55a868" if s.resilient else "#c44e52" for s in res.scenarios]
+    bars = ax_fill.bar(labels, fills, color=colors)
+    for bar, v in zip(bars, fills, strict=True):
+        ax_fill.text(bar.get_x() + bar.get_width() / 2, v, f"{v:.1f}%",
+                     ha="center", va="bottom", fontsize=10, fontweight="bold")
+    ax_fill.axhline(100.0, color="#333333", linestyle="--", linewidth=1.0)
+    ax_fill.set_ylim(0, 112)
+    ax_fill.set_ylabel("Demand served within surviving fleet (%)")
+    ax_fill.set_title("N-1 outage: fill rate if one DC is lost", fontsize=12)
+    ax_fill.grid(True, axis="y", linestyle=":", alpha=0.4)
+
+    # Right: cheapest recovery premium to restore 100% service.
+    pbars = ax_prem.bar(labels, premiums, color="#4c72b0")
+    for bar, s in zip(pbars, res.scenarios, strict=True):
+        tag = ("+" + ", ".join(s.recovery_activated)) if s.recovery_activated else "no add"
+        ax_prem.text(bar.get_x() + bar.get_width() / 2, s.recovery_premium,
+                     f"${s.recovery_premium:,.0f}\n{tag}", ha="center", va="bottom",
+                     fontsize=9)
+    ax_prem.set_ylabel("Recovery premium ($ added fixed + transport)")
+    ax_prem.set_title("Cheapest standby activation to restore 100%", fontsize=12)
+    ax_prem.grid(True, axis="y", linestyle=":", alpha=0.4)
+    ax_prem.margins(y=0.18)
+
+    verdict = ("N-1 resilient" if res.n_1_resilient
+               else f"{res.n_critical} of {len(res.scenarios)} opened DCs are critical")
+    fig.suptitle(f"Disruption resilience: single-DC-outage screen ({verdict})",
+                 fontsize=14, y=0.98)
+    caption = textwrap.fill(resilience_readout(res)[1], 110)
+    fig.text(0.5, 0.02, caption, ha="center", fontsize=9, color="#333333")
+    fig.subplots_adjust(bottom=0.14, top=0.90, wspace=0.28)
+    pdf.savefig(fig)
+    plt.close(fig)
+
+
 def build_pdf(r: PipelineResult, path: str) -> str:
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
     with PdfPages(path) as pdf:
@@ -245,6 +288,7 @@ def build_pdf(r: PipelineResult, path: str) -> str:
         _cost_breakdown(pdf, r)
         _pooling_chart(pdf, r)
         _co2_pareto(pdf, r)
+        _resilience_chart(pdf, r)
         meta = pdf.infodict()
         meta["Title"] = "Supply-Network Optimization (synthetic)"
         meta["Author"] = "Dimitres Kisimov"
@@ -284,6 +328,12 @@ def build_excel(r: PipelineResult, path: str) -> str:
         ("Safety stock centralized (units)", round(r.pooling.centralized, 1)),
         ("Pooling reduction network (%)", round(r.pooling.network_reduction_pct, 2)),
         ("Pooling reduction full (%)", round(r.pooling.reduction_pct, 2)),
+        ("N-1 resilient (any single DC loss)",
+         "yes" if r.resilience.n_1_resilient else "no"),
+        ("Critical DCs (loss drops service)", r.resilience.n_critical),
+        ("Worst single-loss fill rate (%)",
+         round(r.resilience.worst.fill_rate_pct, 2)),
+        ("Max recovery premium ($)", round(r.resilience.max_recovery_premium, 2)),
     ]
     for ridx, (a, b) in enumerate(rows, start=4):
         ws.cell(ridx, 1, a)
@@ -387,6 +437,39 @@ def build_excel(r: PipelineResult, path: str) -> str:
     wco2.column_dimensions["A"].width = 16
     for col in "BCDEFG":
         wco2.column_dimensions[col].width = 16
+
+    # Resilience sheet: single-DC-outage (N-1) screen + cheapest recovery.
+    wres = wb.create_sheet("Resilience")
+    res = r.resilience
+    wres["A1"] = "Disruption resilience - single-DC-outage (N-1) screen + recovery"
+    wres["A1"].font = Font(bold=True, size=12)
+    verdict = ("N-1 resilient (survives any single DC loss at 100%)"
+               if res.n_1_resilient
+               else f"NOT N-1 resilient: {res.n_critical} of "
+                    f"{len(res.scenarios)} opened DCs are critical")
+    wres["A2"] = f"Committed network {', '.join(res.committed_opened)} - {verdict}"
+    hdr = ["lost_dc", "surviving_dcs", "surviving_capacity", "fill_rate_pct",
+           "unmet_units", "reroute_transport_usd", "recovery_activate",
+           "recovery_added_fixed_usd", "recovery_premium_usd", "recovery_possible"]
+    wres.append([])
+    wres.append(hdr)
+    for c in wres[4]:
+        c.font = bold
+    for s in res.scenarios:
+        wres.append([
+            s.failed_dc, ", ".join(s.survivors), round(s.surviving_capacity, 1),
+            round(s.fill_rate_pct, 2), round(s.unmet_units, 1),
+            round(s.reroute_transport_cost, 2),
+            ", ".join(s.recovery_activated) if s.recovery_activated else "(none)",
+            round(s.recovery_added_fixed, 2), round(s.recovery_premium, 2),
+            "yes" if s.recovery_possible else "no",
+        ])
+    wres.append([])
+    for line in resilience_readout(res):
+        wres.append([line])
+    wres.column_dimensions["A"].width = 16
+    for col in "BCDEFGHIJ":
+        wres.column_dimensions[col].width = 18
 
     # Assignment sheet: opened-DC x customer shipped-units matrix.
     wa = wb.create_sheet("Assignment")

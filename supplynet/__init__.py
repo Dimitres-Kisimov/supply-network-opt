@@ -6,6 +6,7 @@ Modules:
   flow         min-cost multi-echelon flow (graph solver + LP cross-check)
   safetystock  multi-echelon safety stock and risk pooling
   co2_sensitivity  CO2-aware variant + cost/CO2/service sensitivity (Pareto)
+  resilience   single-DC-outage (N-1) contingency screen + cheapest recovery
   pipeline     end-to-end orchestration
   exports      executive PDF + Excel deliverables + CO2 CSV/SVG
 """

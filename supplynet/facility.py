@@ -37,6 +37,8 @@ def solve_facility_milp(
     data: NetworkData,
     time_limit_s: float = 30.0,
     n_open: int | None = None,
+    force_open: set[int] | None = None,
+    force_closed: set[int] | None = None,
 ) -> FacilitySolution:
     """Solve the capacitated facility-location MILP with CBC.
 
@@ -46,6 +48,13 @@ def solve_facility_milp(
     DCs (``sum(y) == n_open``). This is what the CO2/sensitivity sweep uses to
     trace the cost-optimal design at each network density; leaving it ``None``
     reproduces the unconstrained optimum and is fully backward compatible.
+
+    ``force_open`` / ``force_closed`` pin individual DC indices open (``y == 1``)
+    or closed (``y == 0``). The resilience module uses these to model a disrupted
+    network: the failed DC is forced closed and the surviving committed DCs are
+    forced open, so the solver only chooses which standby to activate. Leaving
+    both ``None`` is fully backward compatible.
+
     Raises ``RuntimeError`` if the constrained model is infeasible (e.g. too few
     DCs to cover demand).
     """
@@ -79,6 +88,12 @@ def solve_facility_milp(
     # Optionally force an exact number of open DCs (used by the sensitivity sweep).
     if n_open is not None:
         solver.Add(solver.Sum(y[i] for i in range(n_dc)) == n_open)
+
+    # Optionally pin specific DCs open/closed (used by the resilience recovery model).
+    for i in force_open or ():
+        solver.Add(y[i] == 1)
+    for i in force_closed or ():
+        solver.Add(y[i] == 0)
 
     solver.Minimize(
         solver.Sum(fixed[i] * y[i] for i in range(n_dc))

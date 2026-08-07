@@ -16,6 +16,7 @@ except (AttributeError, ValueError):
 
 from supplynet.co2_sensitivity import tradeoff_readout  # noqa: E402
 from supplynet.pipeline import run_pipeline  # noqa: E402
+from supplynet.resilience import resilience_readout  # noqa: E402
 
 
 def _report(r) -> str:
@@ -70,6 +71,25 @@ def _report(r) -> str:
         )
     lines.append("")
     lines.extend("  " + s for s in tradeoff_readout(r.co2))
+
+    res = r.resilience
+    lines.extend([
+        "",
+        "-- Disruption resilience (single-DC-outage N-1 screen) --",
+        f"  Committed network : {', '.join(res.committed_opened)}  "
+        f"({'N-1 resilient' if res.n_1_resilient else str(res.n_critical) + ' critical DC(s)'})",
+        f"  {'lose DC':>7}  {'surv cap':>9}  {'fill%':>6}  {'unmet':>7}  "
+        f"{'recover by':>11}  {'premium($)':>11}",
+    ])
+    for s in res.scenarios:
+        rec = ", ".join(s.recovery_activated) if s.recovery_possible else "infeasible"
+        prem = f"{s.recovery_premium:,.0f}" if s.recovery_possible else "-"
+        lines.append(
+            f"  {s.failed_dc:>7}  {s.surviving_capacity:>9,.0f}  "
+            f"{s.fill_rate_pct:>6.1f}  {s.unmet_units:>7,.0f}  {rec:>11}  {prem:>11}"
+        )
+    lines.append("")
+    lines.extend("  " + s for s in resilience_readout(res))
     lines.append("=" * 66)
     return "\n".join(lines)
 
