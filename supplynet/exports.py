@@ -22,6 +22,9 @@ from openpyxl.styles import Font  # noqa: E402
 from supplynet.co2_sensitivity import to_csv, to_svg, tradeoff_readout  # noqa: E402
 from supplynet.pipeline import PipelineResult, run_pipeline  # noqa: E402
 from supplynet.resilience import resilience_readout  # noqa: E402
+from supplynet.service_frontier import frontier_readout  # noqa: E402
+from supplynet.service_frontier import to_csv as frontier_to_csv  # noqa: E402
+from supplynet.service_frontier import to_svg as frontier_to_svg  # noqa: E402
 
 DISCLAIMER = (
     "All data in this report is SYNTHETIC and generated from a fixed random seed. "
@@ -280,6 +283,49 @@ def _resilience_chart(pdf: PdfPages, r: PipelineResult) -> None:
     plt.close(fig)
 
 
+def _service_frontier_chart(pdf: PdfPages, r: PipelineResult) -> None:
+    fig, (ax_ss, ax_marg) = plt.subplots(1, 2, figsize=(11, 8.5))
+    sf = r.service_frontier
+    svc = [p.service_level * 100.0 for p in sf.points]
+
+    # Left: safety stock vs service level under the three pooling regimes.
+    ax_ss.plot(svc, [p.ss_decentralized for p in sf.points], marker="o",
+               color="#c44e52", label="Decentralized (1 point / zone)")
+    ax_ss.plot(svc, [p.ss_network for p in sf.points], marker="s",
+               color="#1f9d55", label=f"Network ({r.milp.n_opened} opened DCs)")
+    ax_ss.plot(svc, [p.ss_centralized for p in sf.points], marker="^",
+               color="#4c72b0", label="Fully centralized")
+    ax_ss.set_xlabel("Target service level (%)")
+    ax_ss.set_ylabel("Safety stock (units)")
+    ax_ss.set_title("Safety stock rises convexly with the service target", fontsize=12)
+    ax_ss.legend(fontsize=8)
+    ax_ss.grid(True, linestyle=":", alpha=0.4)
+
+    # Right: marginal carrying cost of each extra service point (network regime).
+    marg_pts = [p for p in sf.points if p.marginal_cost_per_point > 0]
+    labels = [f"{p.service_level:.1%}" for p in marg_pts]
+    marginals = [p.marginal_cost_per_point for p in marg_pts]
+    bars = ax_marg.bar(labels, marginals, color="#dd8452")
+    for bar, v in zip(bars, marginals, strict=True):
+        ax_marg.text(bar.get_x() + bar.get_width() / 2, v, f"${v:,.0f}",
+                     ha="center", va="bottom", fontsize=9)
+    ax_marg.set_xlabel("Service level reached")
+    ax_marg.set_ylabel("Marginal carrying cost ($/yr per service point)")
+    ax_marg.set_title("The last points of service cost the most", fontsize=12)
+    ax_marg.grid(True, axis="y", linestyle=":", alpha=0.4)
+    ax_marg.margins(y=0.18)
+
+    fig.suptitle(
+        "Inventory service-level frontier (illustrative inventory-cost factors)",
+        fontsize=14, y=0.98,
+    )
+    caption = textwrap.fill(frontier_readout(sf)[2], 110)
+    fig.text(0.5, 0.02, caption, ha="center", fontsize=9, color="#333333")
+    fig.subplots_adjust(bottom=0.16, top=0.90, wspace=0.28)
+    pdf.savefig(fig)
+    plt.close(fig)
+
+
 def build_pdf(r: PipelineResult, path: str) -> str:
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
     with PdfPages(path) as pdf:
@@ -289,6 +335,7 @@ def build_pdf(r: PipelineResult, path: str) -> str:
         _pooling_chart(pdf, r)
         _co2_pareto(pdf, r)
         _resilience_chart(pdf, r)
+        _service_frontier_chart(pdf, r)
         meta = pdf.infodict()
         meta["Title"] = "Supply-Network Optimization (synthetic)"
         meta["Author"] = "Dimitres Kisimov"
@@ -334,6 +381,12 @@ def build_excel(r: PipelineResult, path: str) -> str:
         ("Worst single-loss fill rate (%)",
          round(r.resilience.worst.fill_rate_pct, 2)),
         ("Max recovery premium ($)", round(r.resilience.max_recovery_premium, 2)),
+        ("Safety-stock carrying cost @ base SL ($/yr)",
+         round(r.service_frontier.base_point.holding_cost_network, 2)),
+        ("Marginal cost of last service point ($/yr per pt)",
+         round(r.service_frontier.steepest.marginal_cost_per_point, 2)),
+        ("Last-point vs first-point cost ratio (x)",
+         round(r.service_frontier.marginal_ratio_top_to_bottom, 2)),
     ]
     for ridx, (a, b) in enumerate(rows, start=4):
         ws.cell(ridx, 1, a)
@@ -471,6 +524,37 @@ def build_excel(r: PipelineResult, path: str) -> str:
     for col in "BCDEFGHIJ":
         wres.column_dimensions[col].width = 18
 
+    # ServiceFrontier sheet: safety stock / inventory cost vs target service level.
+    wsf = wb.create_sheet("ServiceFrontier")
+    sf = r.service_frontier
+    wsf["A1"] = "Inventory service-level frontier (sweep over target service level)"
+    wsf["A1"].font = Font(bold=True, size=12)
+    wsf["A2"] = (
+        "Inventory $ ILLUSTRATIVE: "
+        f"${sf.unit_value_usd:,.0f}/unit value, {sf.holding_rate_per_year:.0%}/yr "
+        "carrying rate - NOT certified. Pooling assumes independent demand."
+    )
+    hdr = ["service_level", "z", "ss_decentralized", "ss_network",
+           "ss_centralized", "inv_value_network_usd", "holding_cost_usd_per_yr",
+           "marginal_usd_per_service_point"]
+    wsf.append([])
+    wsf.append(hdr)
+    for c in wsf[4]:
+        c.font = bold
+    for p in sf.points:
+        wsf.append([
+            round(p.service_level, 4), round(p.z, 4),
+            round(p.ss_decentralized, 1), round(p.ss_network, 1),
+            round(p.ss_centralized, 1), round(p.inv_value_network, 2),
+            round(p.holding_cost_network, 2), round(p.marginal_cost_per_point, 2),
+        ])
+    wsf.append([])
+    for line in frontier_readout(sf):
+        wsf.append([line])
+    wsf.column_dimensions["A"].width = 16
+    for col in "BCDEFGH":
+        wsf.column_dimensions[col].width = 18
+
     # Assignment sheet: opened-DC x customer shipped-units matrix.
     wa = wb.create_sheet("Assignment")
     header = ["dc_id \\ cust", *list(r.data.customers["cust_id"])]
@@ -496,10 +580,23 @@ def write_deliverables(r: PipelineResult | None = None, out_dir: str = "delivera
     xlsx_path = os.path.join(out_dir, "supply_network_workbook.xlsx")
     csv_path = os.path.join(out_dir, "co2_sensitivity.csv")
     svg_path = os.path.join(out_dir, "co2_cost_frontier.svg")
+    sf_csv_path = os.path.join(out_dir, "service_frontier.csv")
+    sf_svg_path = os.path.join(out_dir, "service_frontier.svg")
     build_pdf(r, pdf_path)
     build_excel(r, xlsx_path)
     with open(csv_path, "w", encoding="utf-8", newline="\n") as fh:
         fh.write(to_csv(r.co2))
     with open(svg_path, "w", encoding="utf-8", newline="\n") as fh:
         fh.write(to_svg(r.co2))
-    return {"pdf": pdf_path, "xlsx": xlsx_path, "csv": csv_path, "svg": svg_path}
+    with open(sf_csv_path, "w", encoding="utf-8", newline="\n") as fh:
+        fh.write(frontier_to_csv(r.service_frontier))
+    with open(sf_svg_path, "w", encoding="utf-8", newline="\n") as fh:
+        fh.write(frontier_to_svg(r.service_frontier))
+    return {
+        "pdf": pdf_path,
+        "xlsx": xlsx_path,
+        "csv": csv_path,
+        "svg": svg_path,
+        "sf_csv": sf_csv_path,
+        "sf_svg": sf_svg_path,
+    }

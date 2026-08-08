@@ -72,6 +72,13 @@ the distributor's real cost rates before any commitment.
 ## 7. Deliverable
 
 `python -m supplynet --deliverables` produces an executive **PDF** (headline
-savings, network map, cost breakdown, pooling chart) and an **Excel workbook**
-(Summary, Facilities, Flows, SafetyStock, Customers, Assignment) that a planner
-can hand to finance and operations.
+savings, network map, cost breakdown, pooling chart, cost-vs-CO2 Pareto page,
+disruption-resilience page, and an inventory service-level-frontier page) and an
+**Excel workbook** (Summary, Facilities, Flows, SafetyStock, Customers,
+CO2Sensitivity, Resilience, ServiceFrontier, Assignment) that a planner can hand
+to finance and operations. The service-level frontier makes the **cost of the
+service target** explicit: each extra point of service is priced in annual
+inventory carrying cost, and the marginal cost rises convexly toward 100%, so the
+last points of service are the most expensive to buy. Those inventory dollars use
+illustrative unit-value and carrying-rate placeholders (section 6), to be replaced
+with the distributor's own rates before any commitment.

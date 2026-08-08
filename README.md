@@ -113,6 +113,50 @@ guaranteed service outcome. Recovery re-optimizes strategically (cheapest networ
 excluding the failed DC while keeping survivors); a true fast operational failover
 would also model switching time and standing standby cost.
 
+## What does service cost? An inventory service-level frontier
+
+The safety-stock section above fixes the service target at 95%. But the target is
+itself a priced lever. Base-stock safety stock scales with the standard-normal
+quantile `z(service_level)`, and `z` climbs ever more steeply toward 100%, so the
+*last* points of service tie up far more inventory than the first. The
+`service_frontier` module sweeps the target and, for the *committed* network,
+traces safety stock (units) under all three pooling regimes, the dollars that
+stock ties up, and the **marginal carrying cost of each extra point of service**.
+It re-uses the existing `pooling_analysis` engine unchanged — one call per level —
+so at 95% it reproduces the headline pooling numbers exactly. Seed 42:
+
+| Service | z | SS decentralized | SS network | SS centralized | Carry $/yr (network) | Marginal $/pt |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 80.0% | 0.84 | 11,854 | 4,066 | 2,358 | $50,823 | — |
+| 85.0% | 1.04 | 14,598 | 5,007 | 2,904 | $62,587 | $2,353 |
+| 90.0% | 1.28 | 18,051 | 6,191 | 3,591 | $77,389 | $2,960 |
+| **95.0%** | 1.64 | 23,168 | **7,946** | 4,608 | **$99,327** | $4,388 |
+| 97.5% | 1.96 | 27,607 | 9,468 | 5,491 | $118,356 | $7,611 |
+| 99.0% | 2.33 | 32,767 | 11,238 | 6,518 | $140,481 | $14,750 |
+
+The plain-language read the tool prints:
+
+- **Diminishing returns.** Going 97.5% → 99.0% costs about **$14,750/yr per service
+  point** — roughly **6.3x** the cost per point of the first increment (80% → 85%).
+  The convex `z(sl)` curve *is* the "last mile of service is the expensive one"
+  effect, in dollars.
+- **Pooling read as service, not just inventory.** The 23,168 units a decentralized
+  network needs for 95% service, pooled into the opened DCs, lift the safety
+  factor from z ≈ 1.64 to z ≈ 4.80 — cutting the modeled stockout probability from
+  5% to under 0.01%. That is the same square-root law the pooling section reports
+  as a −65.7% inventory cut, read the other way round: the freed units buy service.
+
+Honest scope: the dollar figures use an **illustrative** unit value ($50/unit) and
+annual carrying rate (25%/yr) — round textbook placeholders, **not** a real cost of
+capital; swap them before quoting any number. Safety stock is **modelled, not
+measured**, on normal, independent demand, so the pooling gain is an optimistic
+bound (real demand is partly correlated). And the "buys service" figure lands deep
+in the normal tail (z ≈ 4.8), where the normal model is unreliable — treat it as a
+direction, not a service guarantee. `--deliverables` adds a two-panel service-
+frontier page to the PDF, a `ServiceFrontier` sheet to the workbook, and writes the
+frontier as `deliverables/service_frontier.csv` and a hand-drawn
+`deliverables/service_frontier.svg`.
+
 ## How to run it
 
 ```bash
@@ -121,14 +165,16 @@ pip install -r requirements.txt
 python -m supplynet                 # print the analysis report
 python -m supplynet --deliverables  # also write the PDF + Excel to deliverables/
 python -m supplynet --seed 7        # try a different synthetic instance
+python -m supplynet --service-level 0.98   # move the base service target
 ```
 
 The deliverables step writes an executive PDF (cover with disclaimer and
 headline savings, a network map of opened DCs and flows, a cost-breakdown bar,
-a safety-stock pooling chart, a cost-vs-CO2 Pareto page, and a disruption-
-resilience page) plus an Excel workbook (Summary, Facilities, Flows, SafetyStock,
-Customers, CO2Sensitivity, Resilience, Assignment) and the CO2 frontier as a CSV
-and a hand-drawn SVG.
+a safety-stock pooling chart, a cost-vs-CO2 Pareto page, a disruption-resilience
+page, and an inventory service-level-frontier page) plus an Excel workbook
+(Summary, Facilities, Flows, SafetyStock, Customers, CO2Sensitivity, Resilience,
+ServiceFrontier, Assignment) and both the CO2 frontier and the service frontier
+as a CSV and a hand-drawn SVG each.
 
 Run the checks with `python -m ruff check .` and `python -m pytest -q`.
 
@@ -173,6 +219,19 @@ cheapest standby to activate; the added fixed cost plus the transport change is
 the recovery premium. This models capacity as the only hard operating limit and
 treats demand as deterministic — a planning screen, not a live-failover SLA.
 
+**5. Inventory service-level frontier.** I sweep the target service level and, at
+each level, call the *same* `pooling_analysis` engine to size safety stock under
+the decentralized, network-pooled and fully-centralized regimes, then convert
+units to inventory value and annual carrying cost with an illustrative unit value
+and holding rate. The marginal carrying cost of each service point is the discrete
+slope of that curve; because `z(sl)` is convex it rises monotonically, so the last
+points of service are the priciest. I also invert the square-root law: fixing the
+inventory budget to the decentralized safety stock for the base service level, the
+pooled safety factor `z` scales by the pooling ratio, so the same units "buy" a
+higher service level. That inverted figure lands deep in the normal tail, where
+the normal model is unreliable, so it is reported as a direction with that caveat.
+Exact as computed; the same normal, independent-demand assumptions apply.
+
 ## Honesty notes
 
 - Data is synthetic and seeded. No real customers, costs, or locations.
@@ -188,6 +247,10 @@ treats demand as deterministic — a planning screen, not a live-failover SLA.
 - The resilience screen models **capacity as the only hard limit** and demand as
   deterministic; fill rates are a planning screen, not a guaranteed service level,
   and recovery is a cheapest-redesign estimate, not a timed operational failover.
+- The service-level frontier's dollar figures use an **illustrative** unit value
+  ($50/unit) and carrying rate (25%/yr), not certified rates. Safety stock is
+  modelled, not measured; the "same inventory buys more service" figure is deep in
+  the normal tail (z ≈ 4.8), where the model is unreliable — a direction, not an SLA.
 
 ## Layout
 
@@ -199,10 +262,12 @@ supplynet/
   safetystock.py     base-stock safety stock + risk pooling
   co2_sensitivity.py CO2-aware variant + cost/CO2/service sweep (Pareto frontier)
   resilience.py      single-DC-outage (N-1) screen + cheapest recovery
+  service_frontier.py inventory service-level frontier (safety stock/cost vs service)
   pipeline.py        end-to-end orchestration
-  exports.py         executive PDF + Excel workbook + CO2 CSV/SVG
+  exports.py         executive PDF + Excel workbook + CO2 & service-frontier CSV/SVG
   __main__.py        CLI
-tests/            39 tests (data, facility, flow, safety stock, co2, resilience, exports)
+tests/            53 tests (data, facility, flow, safety stock, co2, resilience,
+                  service frontier, exports)
 docs/BUSINESS_CASE.md
 ```
 

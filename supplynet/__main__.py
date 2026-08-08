@@ -17,6 +17,7 @@ except (AttributeError, ValueError):
 from supplynet.co2_sensitivity import tradeoff_readout  # noqa: E402
 from supplynet.pipeline import run_pipeline  # noqa: E402
 from supplynet.resilience import resilience_readout  # noqa: E402
+from supplynet.service_frontier import frontier_readout  # noqa: E402
 
 
 def _report(r) -> str:
@@ -90,6 +91,26 @@ def _report(r) -> str:
         )
     lines.append("")
     lines.extend("  " + s for s in resilience_readout(res))
+
+    sf = r.service_frontier
+    lines.extend([
+        "",
+        "-- Inventory service-level frontier (safety stock / cost vs service) --",
+        "  Inventory $ use ILLUSTRATIVE factors "
+        f"(${sf.unit_value_usd:,.0f}/unit, {sf.holding_rate_per_year:.0%}/yr carry), "
+        "not certified.",
+        f"  {'svc':>5}  {'z':>5}  {'SS dec':>8}  {'SS net':>8}  {'SS cen':>8}  "
+        f"{'carry$/yr':>10}  {'marg$/pt':>9}",
+    ])
+    for pt in sf.points:
+        marg = f"{pt.marginal_cost_per_point:,.0f}" if pt.marginal_cost_per_point else "-"
+        lines.append(
+            f"  {pt.service_level:>5.1%}  {pt.z:>5.2f}  {pt.ss_decentralized:>8,.0f}  "
+            f"{pt.ss_network:>8,.0f}  {pt.ss_centralized:>8,.0f}  "
+            f"{pt.holding_cost_network:>10,.0f}  {marg:>9}"
+        )
+    lines.append("")
+    lines.extend("  " + s for s in frontier_readout(sf))
     lines.append("=" * 66)
     return "\n".join(lines)
 
