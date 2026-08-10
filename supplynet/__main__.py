@@ -15,6 +15,7 @@ except (AttributeError, ValueError):
     pass
 
 from supplynet.co2_sensitivity import tradeoff_readout  # noqa: E402
+from supplynet.growth import growth_readout  # noqa: E402
 from supplynet.pipeline import run_pipeline  # noqa: E402
 from supplynet.resilience import resilience_readout  # noqa: E402
 from supplynet.service_frontier import frontier_readout  # noqa: E402
@@ -111,6 +112,34 @@ def _report(r) -> str:
         )
     lines.append("")
     lines.extend("  " + s for s in frontier_readout(sf))
+
+    g = r.growth
+    lines.extend([
+        "",
+        "-- Demand-growth capacity plan (expansion triggers + headroom) --",
+        "  Uniform growth, deterministic demand, flat costs; capacity is the "
+        "only hard limit.",
+        f"  {'growth':>6}  {'demand':>7}  {'#DCs':>4}  {'optimal cost':>12}  "
+        f"{'$/unit':>6}  {'committed':>10}  change",
+    ])
+    prev_n = g.base_n_opened
+    prev_set = set(g.base_opened)
+    for pt in g.points:
+        committed = f"{pt.committed_cost:,.0f}" if pt.committed_feasible else "- wall -"
+        if pt.n_opened > prev_n:
+            change = f"+DC (now {pt.n_opened})"
+        elif set(pt.opened) != prev_set:
+            change = "reshuffle"
+        else:
+            change = ""
+        lines.append(
+            f"  {pt.growth:>5.2f}x  {pt.demand_units:>7,.0f}  {pt.n_opened:>4}  "
+            f"{pt.cost:>12,.0f}  {pt.cost_per_unit:>6.2f}  {committed:>10}  {change}"
+        )
+        prev_n = pt.n_opened
+        prev_set = set(pt.opened)
+    lines.append("")
+    lines.extend("  " + s for s in growth_readout(g))
     lines.append("=" * 66)
     return "\n".join(lines)
 

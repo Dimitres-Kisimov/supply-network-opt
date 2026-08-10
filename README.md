@@ -157,6 +157,62 @@ frontier page to the PDF, a `ServiceFrontier` sheet to the workbook, and writes 
 frontier as `deliverables/service_frontier.csv` and a hand-drawn
 `deliverables/service_frontier.svg`.
 
+## When does growth force the next DC? A demand-growth expansion plan
+
+Everything above optimizes the network for *today's* demand. But a network is
+committed for years while demand moves, so the `growth` module asks the
+capacity planner's question: **how much growth can the committed network
+absorb, and at what demand level does the next DC start to pay?** It sweeps a
+uniform demand multiplier (1.00x to 2.00x in 5% steps) and, at every level,
+**re-solves the same facility-location MILP twice**: unconstrained (the network
+you would build at that demand) and with today's three DCs pinned open and
+every other candidate pinned closed — the same `force_open`/`force_closed`
+pins the resilience module uses — so the frozen network's cost and its exact
+capacity wall fall out of the same engine. Seed 42 (condensed to the levels
+where the design changes):
+
+| Growth | Demand | Optimal DCs | Optimal cost | $/unit | Committed (frozen) |
+| ---: | ---: | :--- | ---: | ---: | ---: |
+| 1.00x | 17,880 | 3 — DC1, DC4, DC6 | $310,666 | 17.38 | $310,666 |
+| 1.05x | 18,774 | 3 — unchanged | $312,435 | 16.64 | $312,435 |
+| 1.10x | 19,668 | 3 — swap DC6 → DC0 | $321,694 | 16.36 | — capacity wall — |
+| **1.30x** | 23,244 | **4** — DC0, DC1, DC4, DC6 | $399,787 | 17.20 | — |
+| **1.65x** | 29,502 | **5** — DC0, DC1, DC3, DC4, DC6 | $514,629 | 17.44 | — |
+| **1.95x** | 34,866 | **6** — DC0, DC1, DC3, DC4, DC6, DC7 | $636,613 | 18.26 | — |
+| 2.00x | 35,760 | 6 — DC0, DC1, DC2, DC3, DC4, DC6 | $647,359 | 18.10 | — |
+
+The plain-language read the tool prints:
+
+- **The lean network has only +8.8% growth headroom.** The committed DCs hold
+  19,451 units of capacity against 17,880 units of demand, so the capacity wall
+  sits at exactly 1.088x today's demand — the flip side of the same leanness the
+  N-1 screen flags. Up to that wall, freezing today's network costs **nothing
+  extra**: capacity, not economics, forces the first change.
+- **The first response to growth is a reshuffle, not a new DC.** At 1.10x the
+  optimizer swaps DC6 (4,324 capacity) out for DC0 (4,757) and stays at 3 DCs.
+  The **4th DC first pays at 1.30x** — exactly when any 3-DC design physically
+  caps out (the three largest candidates hold 23,116 units = 1.29x). The 5th
+  arrives at 1.65x; the **6th at 1.95x is an economic trigger** — a 5-DC design
+  is still feasible there (ceiling 1.99x), but six is already cheaper.
+- **Cost per unit is a sawtooth around ~$17.4.** It *falls* as opened DCs fill
+  toward capacity and *jumps* when the design changes — economies of fill, not
+  of scale (fixed costs and rates are flat by assumption).
+- **Two ceilings, two echelons.** The full 8-candidate DC pool caps at 2.74x
+  demand (49,035 units), but the plant echelon — not re-solved in this siting
+  sweep — totals only 2.10x, so plants would bind first. A real expansion plan
+  has to widen both.
+
+Honest scope: growth is modeled as **uniform** (every zone scales by the same
+factor, so the demand mix and geography never change — real growth is lumpy and
+shifts the map), demand is deterministic, DC capacity is the only hard operating
+limit, and fixed costs and transport rates are held flat as volumes grow (no
+scale economies, no inflation). Expansion triggers are planning estimates on
+synthetic data, not forecasts. `--deliverables` adds a two-panel growth page to
+the PDF (cost of growth vs the frozen network + the expansion staircase), a
+`Growth` sheet to the workbook, and writes the sweep as
+`deliverables/growth_plan.csv` and a hand-drawn
+`deliverables/growth_expansion.svg`.
+
 ## How to run it
 
 ```bash
@@ -171,10 +227,11 @@ python -m supplynet --service-level 0.98   # move the base service target
 The deliverables step writes an executive PDF (cover with disclaimer and
 headline savings, a network map of opened DCs and flows, a cost-breakdown bar,
 a safety-stock pooling chart, a cost-vs-CO2 Pareto page, a disruption-resilience
-page, and an inventory service-level-frontier page) plus an Excel workbook
-(Summary, Facilities, Flows, SafetyStock, Customers, CO2Sensitivity, Resilience,
-ServiceFrontier, Assignment) and both the CO2 frontier and the service frontier
-as a CSV and a hand-drawn SVG each.
+page, an inventory service-level-frontier page, and a demand-growth expansion
+page) plus an Excel workbook (Summary, Facilities, Flows, SafetyStock,
+Customers, CO2Sensitivity, Resilience, ServiceFrontier, Growth, Assignment) and
+the CO2 frontier, the service frontier and the growth plan as a CSV and a
+hand-drawn SVG each.
 
 Run the checks with `python -m ruff check .` and `python -m pytest -q`.
 
@@ -232,6 +289,18 @@ higher service level. That inverted figure lands deep in the normal tail, where
 the normal model is unreliable, so it is reported as a direction with that caveat.
 Exact as computed; the same normal, independent-demand assumptions apply.
 
+**6. Demand-growth capacity planning.** I scale every zone's demand by a uniform
+multiplier and, at each swept level, re-solve the same capacitated facility MILP
+unconstrained (the expansion view) and with today's opened DCs pinned open and
+all other candidates pinned closed (the frozen view, via the same two pins the
+resilience module added). Where the unconstrained optimum's open-DC count steps
+up, that level is an expansion trigger. Two anchors need no solver and
+cross-check the sweep exactly: the committed capacity wall (committed capacity /
+base demand) and the physical ceiling of any k-DC design (the k largest
+candidate capacities / base demand) — an expansion trigger below that ceiling is
+economic; at it, it is forced. Uniform growth, deterministic demand and flat
+costs are stated assumptions, not claims about real demand.
+
 ## Honesty notes
 
 - Data is synthetic and seeded. No real customers, costs, or locations.
@@ -251,6 +320,11 @@ Exact as computed; the same normal, independent-demand assumptions apply.
   ($50/unit) and carrying rate (25%/yr), not certified rates. Safety stock is
   modelled, not measured; the "same inventory buys more service" figure is deep in
   the normal tail (z ≈ 4.8), where the model is unreliable — a direction, not an SLA.
+- The growth plan models **uniform** growth (every zone scales alike; the mix and
+  the map never change) with deterministic demand and flat costs and rates — no
+  scale economies, no inflation. The plant echelon is not re-solved in the siting
+  sweep; its ceiling is reported separately. Expansion triggers are model-based
+  planning estimates on synthetic data, not forecasts.
 
 ## Layout
 
@@ -263,11 +337,12 @@ supplynet/
   co2_sensitivity.py CO2-aware variant + cost/CO2/service sweep (Pareto frontier)
   resilience.py      single-DC-outage (N-1) screen + cheapest recovery
   service_frontier.py inventory service-level frontier (safety stock/cost vs service)
+  growth.py          demand-growth capacity plan (expansion triggers + headroom)
   pipeline.py        end-to-end orchestration
-  exports.py         executive PDF + Excel workbook + CO2 & service-frontier CSV/SVG
+  exports.py         executive PDF + Excel workbook + CO2/service/growth CSV & SVG
   __main__.py        CLI
-tests/            53 tests (data, facility, flow, safety stock, co2, resilience,
-                  service frontier, exports)
+tests/            71 tests (data, facility, flow, safety stock, co2, resilience,
+                  service frontier, growth, exports)
 docs/BUSINESS_CASE.md
 ```
 

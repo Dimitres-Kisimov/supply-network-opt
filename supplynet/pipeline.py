@@ -14,6 +14,7 @@ from supplynet.facility import (
     solve_facility_milp,
 )
 from supplynet.flow import solve_flow
+from supplynet.growth import GrowthPlan, run_growth_plan
 from supplynet.resilience import ResilienceReport, resilience_analysis
 from supplynet.safetystock import PoolingResult, echelon_safety_stock, pooling_analysis
 from supplynet.service_frontier import ServiceFrontier, run_service_frontier
@@ -31,6 +32,7 @@ class PipelineResult:
     co2: Co2Sensitivity
     resilience: ResilienceReport
     service_frontier: ServiceFrontier
+    growth: GrowthPlan
 
     @property
     def opened_idx(self) -> list[int]:
@@ -62,6 +64,7 @@ def run_pipeline(seed: int = 42, service_level: float = 0.95) -> PipelineResult:
     service_frontier = run_service_frontier(
         data, assignment=milp.assignment, base_service_level=service_level
     )
+    growth = run_growth_plan(data, base=milp)
 
     return PipelineResult(
         data=data,
@@ -74,4 +77,5 @@ def run_pipeline(seed: int = 42, service_level: float = 0.95) -> PipelineResult:
         co2=co2,
         resilience=resilience,
         service_frontier=service_frontier,
+        growth=growth,
     )

@@ -20,6 +20,9 @@ from openpyxl import Workbook  # noqa: E402
 from openpyxl.styles import Font  # noqa: E402
 
 from supplynet.co2_sensitivity import to_csv, to_svg, tradeoff_readout  # noqa: E402
+from supplynet.growth import growth_readout  # noqa: E402
+from supplynet.growth import to_csv as growth_to_csv  # noqa: E402
+from supplynet.growth import to_svg as growth_to_svg  # noqa: E402
 from supplynet.pipeline import PipelineResult, run_pipeline  # noqa: E402
 from supplynet.resilience import resilience_readout  # noqa: E402
 from supplynet.service_frontier import frontier_readout  # noqa: E402
@@ -326,6 +329,64 @@ def _service_frontier_chart(pdf: PdfPages, r: PipelineResult) -> None:
     plt.close(fig)
 
 
+def _growth_chart(pdf: PdfPages, r: PipelineResult) -> None:
+    fig, (ax_cost, ax_stair) = plt.subplots(1, 2, figsize=(11, 8.5))
+    g = r.growth
+    growths = [p.growth for p in g.points]
+
+    # Left: re-optimized vs frozen committed cost across the growth sweep.
+    ax_cost.plot(growths, [p.cost for p in g.points], marker="o", markersize=4,
+                 color="#1f9d55", label="Re-optimized at each level", zorder=3)
+    committed = [p for p in g.points if p.committed_feasible]
+    if committed:
+        ax_cost.plot([p.growth for p in committed],
+                     [p.committed_cost for p in committed], marker="s",
+                     markersize=4, color="#c44e52", linestyle="--",
+                     label="Committed network frozen", zorder=2)
+    ax_cost.axvline(g.committed_wall_growth, color="#c44e52", linestyle=":",
+                    linewidth=1.2)
+    ax_cost.annotate(
+        f"committed wall {g.committed_wall_growth:.3f}x\n"
+        f"({g.committed_headroom_pct:+.1f}% headroom)",
+        (g.committed_wall_growth, ax_cost.get_ylim()[0]), fontsize=8,
+        color="#c44e52", xytext=(6, 18), textcoords="offset points",
+    )
+    for p in g.expansion_triggers:
+        ax_cost.annotate(f"{p.n_opened} DCs", (p.growth, p.cost), fontsize=8,
+                         xytext=(4, -12), textcoords="offset points")
+    ax_cost.set_xlabel("Demand growth (x today)")
+    ax_cost.set_ylabel("Total network cost ($, fixed + outbound transport)")
+    ax_cost.set_title("Cost of growth: redesign vs frozen network", fontsize=12)
+    ax_cost.legend(fontsize=8, loc="upper left")
+    ax_cost.grid(True, linestyle=":", alpha=0.4)
+
+    # Right: the expansion staircase -- optimal open-DC count vs demand growth.
+    ax_stair.step(growths, [p.n_opened for p in g.points], where="post",
+                  color="#4c72b0", linewidth=2.0)
+    for p in g.expansion_triggers:
+        ax_stair.annotate(f"DC #{p.n_opened} pays\nat {p.growth:.2f}x",
+                          (p.growth, p.n_opened), fontsize=8,
+                          xytext=(4, -22), textcoords="offset points")
+    ax_stair.set_xlabel("Demand growth (x today)")
+    ax_stair.set_ylabel("Optimal number of open DCs")
+    ax_stair.set_yticks(sorted({p.n_opened for p in g.points}))
+    ax_stair.set_title("The expansion staircase (MILP re-solved per level)",
+                       fontsize=12)
+    ax_stair.grid(True, linestyle=":", alpha=0.4)
+    ax_stair.margins(y=0.2)
+
+    fig.suptitle(
+        "Demand-growth capacity plan: expansion triggers and headroom "
+        "(uniform growth, synthetic data)",
+        fontsize=14, y=0.98,
+    )
+    caption = textwrap.fill(growth_readout(g)[0], 110)
+    fig.text(0.5, 0.02, caption, ha="center", fontsize=9, color="#333333")
+    fig.subplots_adjust(bottom=0.14, top=0.90, wspace=0.28)
+    pdf.savefig(fig)
+    plt.close(fig)
+
+
 def build_pdf(r: PipelineResult, path: str) -> str:
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
     with PdfPages(path) as pdf:
@@ -336,6 +397,7 @@ def build_pdf(r: PipelineResult, path: str) -> str:
         _co2_pareto(pdf, r)
         _resilience_chart(pdf, r)
         _service_frontier_chart(pdf, r)
+        _growth_chart(pdf, r)
         meta = pdf.infodict()
         meta["Title"] = "Supply-Network Optimization (synthetic)"
         meta["Author"] = "Dimitres Kisimov"
@@ -387,6 +449,16 @@ def build_excel(r: PipelineResult, path: str) -> str:
          round(r.service_frontier.steepest.marginal_cost_per_point, 2)),
         ("Last-point vs first-point cost ratio (x)",
          round(r.service_frontier.marginal_ratio_top_to_bottom, 2)),
+        ("Committed growth headroom (%)",
+         round(r.growth.committed_headroom_pct, 2)),
+        ("Committed capacity wall (x demand)",
+         round(r.growth.committed_wall_growth, 4)),
+        ("First expansion trigger (x demand)",
+         r.growth.first_expansion.growth if r.growth.first_expansion else "n/a"),
+        ("DCs opened at max swept growth",
+         r.growth.points[-1].n_opened if r.growth.points else "n/a"),
+        ("DC-portfolio growth ceiling (x demand)",
+         round(r.growth.dc_ceiling_growth, 4)),
     ]
     for ridx, (a, b) in enumerate(rows, start=4):
         ws.cell(ridx, 1, a)
@@ -555,6 +627,41 @@ def build_excel(r: PipelineResult, path: str) -> str:
     for col in "BCDEFGH":
         wsf.column_dimensions[col].width = 18
 
+    # Growth sheet: demand-growth expansion plan (re-optimized vs frozen).
+    wg = wb.create_sheet("Growth")
+    g = r.growth
+    wg["A1"] = "Demand-growth capacity plan (sweep over a uniform growth multiplier)"
+    wg["A1"].font = Font(bold=True, size=12)
+    wg["A2"] = (
+        "UNIFORM growth (every zone scales alike), deterministic demand, flat "
+        "costs and rates; DC capacity is the only hard limit. Committed columns "
+        "blank past the capacity wall."
+    )
+    hdr = ["growth_x", "demand_units", "n_dcs_optimal", "opened", "cost_usd",
+           "cost_per_unit_usd", "capacity_utilization_pct", "reconfigured",
+           "expanded", "committed_feasible", "committed_cost_usd",
+           "committed_premium_usd"]
+    wg.append([])
+    wg.append(hdr)
+    for c in wg[4]:
+        c.font = bold
+    for p in g.points:
+        wg.append([
+            round(p.growth, 2), round(p.demand_units, 1), p.n_opened,
+            ", ".join(p.opened), round(p.cost, 2), round(p.cost_per_unit, 4),
+            round(p.utilization_pct, 2), "yes" if p.reconfigured else "no",
+            "yes" if p.expanded else "no",
+            "yes" if p.committed_feasible else "no",
+            round(p.committed_cost, 2) if p.committed_feasible else "",
+            round(p.committed_premium, 2) if p.committed_feasible else "",
+        ])
+    wg.append([])
+    for line in growth_readout(g):
+        wg.append([line])
+    wg.column_dimensions["A"].width = 12
+    for col in "BCDEFGHIJKL":
+        wg.column_dimensions[col].width = 18
+
     # Assignment sheet: opened-DC x customer shipped-units matrix.
     wa = wb.create_sheet("Assignment")
     header = ["dc_id \\ cust", *list(r.data.customers["cust_id"])]
@@ -582,6 +689,8 @@ def write_deliverables(r: PipelineResult | None = None, out_dir: str = "delivera
     svg_path = os.path.join(out_dir, "co2_cost_frontier.svg")
     sf_csv_path = os.path.join(out_dir, "service_frontier.csv")
     sf_svg_path = os.path.join(out_dir, "service_frontier.svg")
+    growth_csv_path = os.path.join(out_dir, "growth_plan.csv")
+    growth_svg_path = os.path.join(out_dir, "growth_expansion.svg")
     build_pdf(r, pdf_path)
     build_excel(r, xlsx_path)
     with open(csv_path, "w", encoding="utf-8", newline="\n") as fh:
@@ -592,6 +701,10 @@ def write_deliverables(r: PipelineResult | None = None, out_dir: str = "delivera
         fh.write(frontier_to_csv(r.service_frontier))
     with open(sf_svg_path, "w", encoding="utf-8", newline="\n") as fh:
         fh.write(frontier_to_svg(r.service_frontier))
+    with open(growth_csv_path, "w", encoding="utf-8", newline="\n") as fh:
+        fh.write(growth_to_csv(r.growth))
+    with open(growth_svg_path, "w", encoding="utf-8", newline="\n") as fh:
+        fh.write(growth_to_svg(r.growth))
     return {
         "pdf": pdf_path,
         "xlsx": xlsx_path,
@@ -599,4 +712,6 @@ def write_deliverables(r: PipelineResult | None = None, out_dir: str = "delivera
         "svg": svg_path,
         "sf_csv": sf_csv_path,
         "sf_svg": sf_svg_path,
+        "growth_csv": growth_csv_path,
+        "growth_svg": growth_svg_path,
     }
