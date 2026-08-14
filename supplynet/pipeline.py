@@ -1,4 +1,5 @@
-"""End-to-end orchestration: data -> facility MILP + baseline -> flow -> pooling.
+"""End-to-end orchestration: data -> facility MILP + baseline -> flow -> pooling
+-> CO2 sweep -> N-1 screen -> service frontier -> growth sweep -> build phasing.
 
 Everything downstream (CLI report, PDF, Excel, tests) consumes the single
 ``PipelineResult`` produced here, so the numbers are computed exactly once.
@@ -15,6 +16,7 @@ from supplynet.facility import (
 )
 from supplynet.flow import solve_flow
 from supplynet.growth import GrowthPlan, run_growth_plan
+from supplynet.phasing import PhasePlan, run_phase_plan
 from supplynet.resilience import ResilienceReport, resilience_analysis
 from supplynet.safetystock import PoolingResult, echelon_safety_stock, pooling_analysis
 from supplynet.service_frontier import ServiceFrontier, run_service_frontier
@@ -33,6 +35,7 @@ class PipelineResult:
     resilience: ResilienceReport
     service_frontier: ServiceFrontier
     growth: GrowthPlan
+    phasing: PhasePlan
 
     @property
     def opened_idx(self) -> list[int]:
@@ -65,6 +68,7 @@ def run_pipeline(seed: int = 42, service_level: float = 0.95) -> PipelineResult:
         data, assignment=milp.assignment, base_service_level=service_level
     )
     growth = run_growth_plan(data, base=milp)
+    phasing = run_phase_plan(data, base=milp)
 
     return PipelineResult(
         data=data,
@@ -78,4 +82,5 @@ def run_pipeline(seed: int = 42, service_level: float = 0.95) -> PipelineResult:
         resilience=resilience,
         service_frontier=service_frontier,
         growth=growth,
+        phasing=phasing,
     )

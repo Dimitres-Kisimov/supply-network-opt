@@ -425,24 +425,27 @@ def to_svg(plan: GrowthPlan) -> str:
         step_pts.append((px(nxt.growth), py_n(nxt.n_opened)))
     poly = " ".join(f"{x:.1f},{y:.1f}" for x, y in step_pts)
     parts.append(
-        f'<polyline points="{poly}" fill="none" stroke="{atlas.BLUE}" '
+        f'<polyline points="{poly}" fill="none" stroke="{atlas.STEEL}" '
         f'stroke-width="2.6" stroke-linejoin="round"/>'
     )
 
     # Start label + one designed label per expansion trigger.
     parts.append(
         f'<circle cx="{px(pts[0].growth):.1f}" cy="{py_n(pts[0].n_opened):.1f}" '
-        f'r="4.5" fill="{atlas.BLUE}" stroke="{atlas.PAPER}" stroke-width="1.8"/>'
+        f'r="4.5" fill="{atlas.STEEL}" stroke="{atlas.PAPER}" stroke-width="1.8"/>'
     )
     parts.append(
         f'<text x="{px(pts[0].growth) + 7:.1f}" '
         f'y="{py_n(pts[0].n_opened) - 9:.1f}" font-size="9.5" '
         f'fill="{atlas.INK2}">{pts[0].n_opened} DCs</text>'
     )
+    # Attention amber marks each trigger; the label beside it names the DC and
+    # the level, so the color never carries the meaning alone. (Kraft, the only
+    # hue amber sits close to, never appears on this plate.)
     for p in plan.expansion_triggers:
         x, y = px(p.growth), py_n(p.n_opened)
         parts.append(
-            f'<circle cx="{x:.1f}" cy="{y:.1f}" r="4.5" fill="{atlas.BLUE}" '
+            f'<circle cx="{x:.1f}" cy="{y:.1f}" r="5" fill="{atlas.AMBER}" '
             f'stroke="{atlas.PAPER}" stroke-width="1.8"/>'
         )
         anchor, dx = ("start", 8) if x < ml + pw * 0.78 else ("end", -8)
@@ -482,7 +485,7 @@ def to_svg(plan: GrowthPlan) -> str:
             f'stroke-dasharray="2 3"/>'
         )
 
-    # Frozen committed network cost (dashed gray), while feasible.
+    # Frozen committed network cost (dashed concrete), while feasible.
     committed = [p for p in pts if p.committed_feasible]
     if committed:
         com_poly = " ".join(
@@ -490,14 +493,14 @@ def to_svg(plan: GrowthPlan) -> str:
         )
         parts.append(
             f'<polyline points="{com_poly}" fill="none" '
-            f'stroke="{atlas.SERIES_GRAY}" stroke-width="1.8" '
+            f'stroke="{atlas.CONCRETE}" stroke-width="1.8" '
             f'stroke-dasharray="5 3"/>'
         )
 
-    # Re-optimized cost curve (blue), triggers emphasized.
+    # Re-optimized cost curve (steel), triggers emphasized in attention amber.
     opt_poly = " ".join(f"{px(p.growth):.1f},{py_c(p.cost):.1f}" for p in pts)
     parts.append(
-        f'<polyline points="{opt_poly}" fill="none" stroke="{atlas.BLUE}" '
+        f'<polyline points="{opt_poly}" fill="none" stroke="{atlas.STEEL}" '
         f'stroke-width="2.2"/>'
     )
     triggers = {id(p) for p in plan.expansion_triggers}
@@ -506,30 +509,31 @@ def to_svg(plan: GrowthPlan) -> str:
         r = 4.2 if is_trigger or p is pts[0] else 2.6
         parts.append(
             f'<circle cx="{px(p.growth):.1f}" cy="{py_c(p.cost):.1f}" r="{r}" '
-            f'fill="{atlas.BLUE}" stroke="{atlas.PAPER}" stroke-width="1.4"/>'
+            f'fill="{atlas.AMBER if is_trigger else atlas.STEEL}" '
+            f'stroke="{atlas.PAPER}" stroke-width="1.4"/>'
         )
 
     # Up to the wall the frozen cost coincides with the re-optimized cost, so
-    # the frozen series rides ON the blue line: hollow gray rings drawn on top
+    # the frozen series rides ON the steel line: hollow concrete rings on top
     # keep it visible exactly where the two series overlap.
     for p in committed:
         parts.append(
             f'<circle cx="{px(p.growth):.1f}" '
             f'cy="{py_c(p.committed_cost):.1f}" r="5.2" fill="none" '
-            f'stroke="{atlas.SERIES_GRAY}" stroke-width="1.6"/>'
+            f'stroke="{atlas.CONCRETE}" stroke-width="1.6"/>'
         )
 
     # legend (upper left of the cost panel, clear of the wall line)
     lx, ly = ml + 96, mt2 + 14
     parts.append(
         f'<line x1="{lx}" y1="{ly}" x2="{lx + 22}" y2="{ly}" '
-        f'stroke="{atlas.BLUE}" stroke-width="2.2"/>'
+        f'stroke="{atlas.STEEL}" stroke-width="2.2"/>'
         f'<text x="{lx + 28}" y="{ly + 4}" font-size="10" fill="{atlas.INK2}">'
         f'Re-optimized at each demand level</text>'
     )
     parts.append(
         f'<line x1="{lx}" y1="{ly + 18}" x2="{lx + 22}" y2="{ly + 18}" '
-        f'stroke="{atlas.SERIES_GRAY}" stroke-width="1.8" '
+        f'stroke="{atlas.CONCRETE}" stroke-width="1.8" '
         f'stroke-dasharray="5 3"/>'
         f'<text x="{lx + 28}" y="{ly + 22}" font-size="10" fill="{atlas.INK2}">'
         f'Committed network frozen (until its capacity wall)</text>'

@@ -68,17 +68,31 @@ the distributor's real cost rates before any commitment.
 - The MILP optimum is optimal *for this instance and model*, not a guarantee for
   larger real networks (facility location is NP-hard).
 - Holding-cost and per-period framing for ROI are illustrative placeholders.
+- The build schedule's demand growth (6%/yr) and discount rate (10%/yr) are
+  illustrative assumptions, not forecasts. Fixed cost is modelled as a recurring
+  operating cost, not capex, and a DC opens with no construction lead time.
 
 ## 7. Deliverable
 
 `python -m supplynet --deliverables` produces an executive **PDF** (headline
 savings, network map, cost breakdown, pooling chart, cost-vs-CO2 Pareto page,
-disruption-resilience page, and an inventory service-level-frontier page) and an
-**Excel workbook** (Summary, Facilities, Flows, SafetyStock, Customers,
-CO2Sensitivity, Resilience, ServiceFrontier, Assignment) that a planner can hand
-to finance and operations. The service-level frontier makes the **cost of the
-service target** explicit: each extra point of service is priced in annual
+disruption-resilience page, an inventory service-level-frontier page, a
+demand-growth expansion page, and a phased-build-schedule page) and an **Excel
+workbook** (Summary, Facilities, Flows, SafetyStock, Customers, CO2Sensitivity,
+Resilience, ServiceFrontier, Growth, BuildSchedule, Assignment) that a planner
+can hand to finance and operations. The service-level frontier makes the **cost
+of the service target** explicit: each extra point of service is priced in annual
 inventory carrying cost, and the marginal cost rises convexly toward 100%, so the
 last points of service are the most expensive to buy. Those inventory dollars use
 illustrative unit-value and carrying-rate placeholders (section 6), to be replaced
 with the distributor's own rates before any commitment.
+
+The **build schedule** turns the same models into the question the board votes
+on — a year and a number. Today's three DCs run out of capacity in **year 2** at
+an assumed +6%/yr growth, so the plan opens DC0 in year 2 and DC3 in year 6 for
+**$2.75M NPV** at an assumed 10% discount rate. Opening that final network today
+instead would cost **$671,597 more in NPV (+24.4%)**. Both rates are illustrative
+assumptions (section 6), and because this model charges fixed cost as a recurring
+operating cost with no capex and no construction lead time, that premium prices
+**readiness**, not a construction decision — it would have to be re-run against
+the distributor's real capex and build lead times before any commitment.

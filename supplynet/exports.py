@@ -1,12 +1,12 @@
 """Executive deliverables: a PDF report and an Excel workbook.
 
-The PDF (matplotlib PdfPages) is a "network atlas": eight numbered plates that
+The PDF (matplotlib PdfPages) is a "network atlas": nine numbered plates that
 share one chrome (see :mod:`supplynet.plates` / :mod:`supplynet.atlas`) -- a
 cover with the synthetic-data disclaimer and headline savings, a network map of
 opened DCs and their flows, a cost-breakdown bar, a safety-stock pooling chart,
-the CO2 Pareto sweep, the N-1 resilience screen, the service-level frontier and
-the demand-growth expansion staircase. The Excel workbook (openpyxl) has
-Summary, Facilities, Flows and SafetyStock sheets.
+the CO2 Pareto sweep, the N-1 resilience screen, the service-level frontier, the
+demand-growth expansion staircase and the phased build schedule. The Excel
+workbook (openpyxl) has Summary, Facilities, Flows and SafetyStock sheets.
 """
 
 import os
@@ -25,26 +25,29 @@ from openpyxl.styles import Font  # noqa: E402
 
 from supplynet import plates  # noqa: E402
 from supplynet.atlas import (  # noqa: E402
-    AQUA,
-    BLUE,
-    BLUE_DARK,
-    BLUE_FLOW,
-    BLUE_SOFT,
+    AMBER,
+    CONCRETE,
+    CONCRETE_FILL,
     CRITICAL,
     GOOD_TEXT,
-    GRAY_FILL,
     INK,
     INK2,
+    KRAFT,
+    KRAFT_LIGHT,
     MUTED,
-    ORANGE,
     PAPER,
+    PATINA,
     RULE,
-    SERIES_GRAY,
+    STEEL,
+    STEEL_DARK,
 )
 from supplynet.co2_sensitivity import to_csv, to_svg, tradeoff_readout  # noqa: E402
 from supplynet.growth import growth_readout  # noqa: E402
 from supplynet.growth import to_csv as growth_to_csv  # noqa: E402
 from supplynet.growth import to_svg as growth_to_svg  # noqa: E402
+from supplynet.phasing import POLICY_ORDER, phasing_readout, schedule_text  # noqa: E402
+from supplynet.phasing import to_csv as phasing_to_csv  # noqa: E402
+from supplynet.phasing import to_svg as phasing_to_svg  # noqa: E402
 from supplynet.pipeline import PipelineResult, run_pipeline  # noqa: E402
 from supplynet.resilience import resilience_readout  # noqa: E402
 from supplynet.service_frontier import frontier_readout  # noqa: E402
@@ -110,7 +113,7 @@ def _cover_page(pdf: PdfPages, r: PipelineResult) -> None:
              "04 RISK POOLING  -  05 COST VS CO2",
              ha="center", fontsize=8, color=MUTED)
     fig.text(0.5, 0.315, "PLATE 06 N-1 RESILIENCE  -  07 SERVICE FRONTIER  -  "
-             "08 GROWTH STAIRCASE",
+             "08 GROWTH STAIRCASE  -  09 BUILD SCHEDULE",
              ha="center", fontsize=8, color=MUTED)
 
     fig.text(0.5, 0.19, textwrap.fill(DISCLAIMER, 92), ha="center", va="center",
@@ -151,12 +154,12 @@ def _network_map(pdf: PdfPages, r: PipelineResult) -> None:
             ax.plot(
                 [d.dcs.iloc[i]["x"], d.customers.iloc[j]["x"]],
                 [d.dcs.iloc[i]["y"], d.customers.iloc[j]["y"]],
-                color=BLUE_FLOW, linewidth=0.5 + 2.8 * f / max_flow, zorder=1,
+                color=KRAFT_LIGHT, linewidth=0.5 + 2.8 * f / max_flow, zorder=1,
                 solid_capstyle="round",
             )
 
     cust_sizes = 10.0 + 30.0 * (d.customers["demand_mean"] - 200.0) / 800.0
-    ax.scatter(d.customers["x"], d.customers["y"], s=cust_sizes, c=SERIES_GRAY,
+    ax.scatter(d.customers["x"], d.customers["y"], s=cust_sizes, c=CONCRETE,
                marker="o", linewidths=0.6, edgecolors=PAPER, zorder=2)
 
     closed = d.dcs[~d.dcs["dc_id"].isin(opened)]
@@ -165,8 +168,8 @@ def _network_map(pdf: PdfPages, r: PipelineResult) -> None:
                facecolors="none", edgecolors=RULE, linewidths=1.2, marker="s",
                zorder=3)
     ax.scatter(open_dcs["x"], open_dcs["y"], s=dc_size(open_dcs["capacity"]),
-               c=BLUE, marker="s", linewidths=1.4, edgecolors=PAPER, zorder=4)
-    ax.scatter(d.plants["x"], d.plants["y"], s=190, c=ORANGE, marker="^",
+               c=STEEL, marker="s", linewidths=1.4, edgecolors=PAPER, zorder=4)
+    ax.scatter(d.plants["x"], d.plants["y"], s=190, c=KRAFT, marker="^",
                linewidths=1.4, edgecolors=PAPER, zorder=5)
 
     # Direct labels: every facility is named on the map.
@@ -192,16 +195,16 @@ def _network_map(pdf: PdfPages, r: PipelineResult) -> None:
     # Legend column to the right of the map, with fixed-size key marks.
     handles = [
         Line2D([], [], marker="o", linestyle="none", markersize=5,
-               markerfacecolor=SERIES_GRAY, markeredgecolor=PAPER,
+               markerfacecolor=CONCRETE, markeredgecolor=PAPER,
                label="Customer zone"),
         Line2D([], [], marker="s", linestyle="none", markersize=8,
                markerfacecolor="none", markeredgecolor=RULE,
                label="DC (not opened)"),
         Line2D([], [], marker="s", linestyle="none", markersize=9,
-               markerfacecolor=BLUE, markeredgecolor=PAPER, label="DC (opened)"),
+               markerfacecolor=STEEL, markeredgecolor=PAPER, label="DC (opened)"),
         Line2D([], [], marker="^", linestyle="none", markersize=9,
-               markerfacecolor=ORANGE, markeredgecolor=PAPER, label="Plant"),
-        Line2D([], [], color=BLUE_FLOW, linewidth=2.0, label="Outbound flow"),
+               markerfacecolor=KRAFT, markeredgecolor=PAPER, label="Plant"),
+        Line2D([], [], color=KRAFT_LIGHT, linewidth=2.0, label="Outbound flow"),
     ]
     ax.legend(handles=handles, loc="upper left", bbox_to_anchor=(1.06, 1.0),
               borderaxespad=0.0)
@@ -228,13 +231,14 @@ def _cost_breakdown(pdf: PdfPages, r: PipelineResult) -> None:
     fixed = [r.greedy.fixed_cost, r.milp.fixed_cost]
     transport = [r.greedy.transport_cost, r.milp.transport_cost]
 
-    # Emphasis is ink-vs-gray: the optimized bar wears the blues, the baseline
-    # wears grays. Stack order is identical (fixed below, transport above) and
+    # Materials carry the meaning: fixed opening cost is built structure, so it
+    # wears steel; transport cost is product moved, so it wears kraft. The
+    # baseline bar recedes into concrete. Stack order is identical and
     # a surface gap separates the segments.
-    ax.bar(labels, fixed, width=0.32, color=[SERIES_GRAY, BLUE_DARK],
+    ax.bar(labels, fixed, width=0.32, color=[CONCRETE, STEEL_DARK],
            edgecolor=PAPER, linewidth=1.5, label="Fixed opening cost")
     ax.bar(labels, transport, bottom=fixed, width=0.32,
-           color=[GRAY_FILL, BLUE_SOFT], edgecolor=PAPER, linewidth=1.5,
+           color=[CONCRETE_FILL, KRAFT], edgecolor=PAPER, linewidth=1.5,
            label="Transport cost")
 
     for k in range(2):
@@ -248,11 +252,12 @@ def _cost_breakdown(pdf: PdfPages, r: PipelineResult) -> None:
     ax.grid(True, axis="y")
     ax.set_axisbelow(True)
 
-    # Legend swatches show the MILP blues; the caption explains the gray bar.
+    # Legend swatches show the optimized bar's materials; the caption explains
+    # the receding concrete baseline beside it.
     handles = [
-        plt.Rectangle((0, 0), 1, 1, facecolor=BLUE_DARK, edgecolor=PAPER,
+        plt.Rectangle((0, 0), 1, 1, facecolor=STEEL_DARK, edgecolor=PAPER,
                       label="Fixed opening cost"),
-        plt.Rectangle((0, 0), 1, 1, facecolor=BLUE_SOFT, edgecolor=PAPER,
+        plt.Rectangle((0, 0), 1, 1, facecolor=KRAFT, edgecolor=PAPER,
                       label="Transport cost"),
     ]
     ax.legend(handles=handles, loc="upper left", bbox_to_anchor=(1.08, 1.0),
@@ -280,9 +285,9 @@ def _pooling_chart(pdf: PdfPages, r: PipelineResult) -> None:
         "Fully centralized\n(single DC)",
     ]
     values = [p.decentralized, p.network, p.centralized]
-    # Entity colors held constant across the atlas: decentralized gray,
-    # the opened-DC network blue, full centralization aqua.
-    colors = [SERIES_GRAY, BLUE, AQUA]
+    # Entity colors held constant across the atlas: decentralized concrete,
+    # the opened-DC network steel, full centralization patina.
+    colors = [CONCRETE, STEEL, PATINA]
     bars = ax.bar(labels, values, width=0.5, color=colors)
     for bar, v in zip(bars, values, strict=True):
         ax.text(bar.get_x() + bar.get_width() / 2, v, f"{v:,.0f}",
@@ -314,12 +319,12 @@ def _co2_pareto(pdf: PdfPages, r: PipelineResult) -> None:
     front = sorted(s.pareto, key=lambda d: d.cost)
     if len(front) >= 2:
         ax.plot([d.cost for d in front], [d.co2_t for d in front],
-                color=BLUE, linewidth=1.4, alpha=0.65, zorder=1,
+                color=STEEL, linewidth=1.4, alpha=0.65, zorder=1,
                 label="Pareto frontier")
 
-    # Pareto designs wear blue; dominated designs recede to gray.
+    # Pareto designs wear steel; dominated designs recede to concrete.
     for d in s.designs:
-        color = BLUE if d.is_pareto else SERIES_GRAY
+        color = STEEL if d.is_pareto else CONCRETE
         is_opt = d is s.cost_optimal
         ax.scatter(d.cost, d.co2_t, s=150 if is_opt else 100, c=color,
                    edgecolors=INK if is_opt else PAPER,
@@ -340,15 +345,15 @@ def _co2_pareto(pdf: PdfPages, r: PipelineResult) -> None:
 
     handles = [
         Line2D([], [], marker="o", linestyle="none", markersize=8,
-               markerfacecolor=BLUE, markeredgecolor=PAPER,
+               markerfacecolor=STEEL, markeredgecolor=PAPER,
                label="Pareto-optimal"),
     ]
     if any(not d.is_pareto for d in s.designs):
         handles.append(Line2D([], [], marker="o", linestyle="none", markersize=7,
-                              markerfacecolor=SERIES_GRAY, markeredgecolor=PAPER,
+                              markerfacecolor=CONCRETE, markeredgecolor=PAPER,
                               label="dominated"))
     if len(front) >= 2:
-        handles.insert(0, Line2D([], [], color=BLUE, linewidth=1.4, alpha=0.65,
+        handles.insert(0, Line2D([], [], color=STEEL, linewidth=1.4, alpha=0.65,
                                  label="Pareto frontier"))
     ax.legend(handles=handles, loc="upper right")
 
@@ -381,7 +386,7 @@ def _resilience_chart(pdf: PdfPages, r: PipelineResult) -> None:
     # Left: each outage as served-vs-unmet demand, stacked to the 100% mark.
     # Status red is reserved for the genuinely bad part: the unmet slice.
     unmet = [100.0 - v for v in fills]
-    bars = ax_fill.bar(labels, fills, width=0.5, color=BLUE, edgecolor=PAPER,
+    bars = ax_fill.bar(labels, fills, width=0.5, color=STEEL, edgecolor=PAPER,
                        linewidth=1.5, label="served")
     ax_fill.bar(labels, unmet, bottom=fills, width=0.5, color=CRITICAL,
                 edgecolor=PAPER, linewidth=1.5, label="unmet")
@@ -397,7 +402,7 @@ def _resilience_chart(pdf: PdfPages, r: PipelineResult) -> None:
     ax_fill.legend(loc="upper center", bbox_to_anchor=(0.5, -0.10), ncols=2)
 
     # Right: cheapest recovery premium to restore 100% service.
-    pbars = ax_prem.bar(labels, premiums, width=0.5, color=BLUE)
+    pbars = ax_prem.bar(labels, premiums, width=0.5, color=STEEL)
     for bar, s in zip(pbars, res.scenarios, strict=True):
         tag = ("+" + ", ".join(s.recovery_activated)) if s.recovery_activated else "no add"
         ax_prem.text(bar.get_x() + bar.get_width() / 2, s.recovery_premium,
@@ -429,14 +434,14 @@ def _service_frontier_chart(pdf: PdfPages, r: PipelineResult) -> None:
     # The regimes keep their atlas colors; the network line carries the weight.
     ax_ss.plot(svc, [p.ss_decentralized for p in sf.points], marker="o",
                markersize=4.5, markeredgecolor=PAPER, markeredgewidth=1.0,
-               color=SERIES_GRAY, linewidth=1.8, linestyle=(0, (4, 2)),
+               color=CONCRETE, linewidth=1.8, linestyle=(0, (4, 2)),
                label="Decentralized (1 point / zone)")
     ax_ss.plot(svc, [p.ss_centralized for p in sf.points], marker="o",
                markersize=4.5, markeredgecolor=PAPER, markeredgewidth=1.0,
-               color=AQUA, linewidth=1.8, label="Fully centralized")
+               color=PATINA, linewidth=1.8, label="Fully centralized")
     ax_ss.plot(svc, [p.ss_network for p in sf.points], marker="o",
                markersize=5.5, markeredgecolor=PAPER, markeredgewidth=1.2,
-               color=BLUE, linewidth=2.4,
+               color=STEEL, linewidth=2.4,
                label=f"Network ({r.milp.n_opened} opened DCs)")
     ax_ss.set_xlabel("Target service level (%)")
     ax_ss.set_ylabel("Safety stock (units)")
@@ -451,7 +456,7 @@ def _service_frontier_chart(pdf: PdfPages, r: PipelineResult) -> None:
     marg_pts = [p for p in sf.points if p.marginal_cost_per_point > 0]
     labels = [f"{p.service_level:.1%}" for p in marg_pts]
     marginals = [p.marginal_cost_per_point for p in marg_pts]
-    bars = ax_marg.bar(labels, marginals, width=0.55, color=BLUE)
+    bars = ax_marg.bar(labels, marginals, width=0.55, color=STEEL)
     for bar, v in zip(bars, marginals, strict=True):
         ax_marg.text(bar.get_x() + bar.get_width() / 2, v, f"${v:,.0f}",
                      ha="center", va="bottom", fontsize=9, color=INK)
@@ -484,9 +489,11 @@ def _growth_chart(pdf: PdfPages, r: PipelineResult) -> None:
 
     # Top: the expansion staircase -- optimal open-DC count vs demand growth.
     ax_stair.step(growths, [p.n_opened for p in g.points], where="post",
-                  color=BLUE, linewidth=2.6, zorder=3)
+                  color=STEEL, linewidth=2.6, zorder=3)
+    # Attention amber marks each trigger; the name beside it carries the meaning,
+    # so the color never has to. (Kraft never appears on this plate.)
     for p in g.expansion_triggers:
-        ax_stair.scatter([p.growth], [p.n_opened], s=42, c=BLUE,
+        ax_stair.scatter([p.growth], [p.n_opened], s=52, c=AMBER,
                          edgecolors=PAPER, linewidths=1.4, zorder=4)
         ax_stair.annotate(f"DC #{p.n_opened} pays\nat {p.growth:.2f}x",
                           (p.growth, p.n_opened), fontsize=8, color=INK2,
@@ -502,18 +509,18 @@ def _growth_chart(pdf: PdfPages, r: PipelineResult) -> None:
 
     # Bottom: re-optimized vs frozen committed cost across the growth sweep.
     ax_cost.plot(growths, [p.cost for p in g.points], marker="o", markersize=4.5,
-                 markeredgecolor=PAPER, markeredgewidth=1.0, color=BLUE,
+                 markeredgecolor=PAPER, markeredgewidth=1.0, color=STEEL,
                  linewidth=2.2, label="Re-optimized at each level", zorder=3)
     committed = [p for p in g.points if p.committed_feasible]
     if committed:
         # Up to the wall the frozen cost coincides with the re-optimized cost,
-        # so the frozen series rides ON the blue line: hollow gray rings on
+        # so the frozen series rides ON the steel line: hollow concrete rings on
         # top keep it visible exactly where the two series overlap.
         ax_cost.plot([p.growth for p in committed],
                      [p.committed_cost for p in committed], marker="o",
                      markersize=7.5, markerfacecolor="none",
-                     markeredgecolor=SERIES_GRAY, markeredgewidth=1.6,
-                     color=SERIES_GRAY, linewidth=1.8, linestyle=(0, (4, 2)),
+                     markeredgecolor=CONCRETE, markeredgewidth=1.6,
+                     color=CONCRETE, linewidth=1.8, linestyle=(0, (4, 2)),
                      label="Committed network frozen", zorder=4)
     ax_cost.set_xlabel("Demand growth (x today)")
     ax_cost.set_ylabel("Total network cost ($, fixed + outbound transport)",
@@ -542,6 +549,84 @@ def _growth_chart(pdf: PdfPages, r: PipelineResult) -> None:
     plt.close(fig)
 
 
+def _phasing_chart(pdf: PdfPages, r: PipelineResult) -> None:
+    ph = r.phasing
+    staged = ph.policies["staged"]
+    ahead = ph.policies["ahead"]
+    fig = plates.new_plate(
+        9, "Phased build plan: when each DC opens, and what the timing is worth",
+        f"(demand +{100.0 * ph.annual_growth:.0f}%/yr, discounted at "
+        f"{100.0 * ph.discount_rate:.0f}%/yr - illustrative assumptions)",
+    )
+    # The dated build staircase is the hero panel, on top; the present-value
+    # streams sit beneath it on the same year axis. Never a dual axis.
+    ax_sched = fig.add_axes([0.09, 0.52, 0.84, 0.28])
+    ax_pv = fig.add_axes([0.09, 0.16, 0.84, 0.26], sharex=ax_sched)
+    plates.despine(ax_sched)
+    plates.despine(ax_pv)
+    years = [y.year for y in staged.years]
+
+    # Top: the build schedule -- open DCs in service, year by year.
+    ax_sched.step(years, [y.n_opened for y in staged.years], where="post",
+                  color=STEEL, linewidth=2.6, zorder=3)
+    for y in staged.build_events:
+        ax_sched.scatter([y.year], [y.n_opened], s=52, c=AMBER,
+                         edgecolors=PAPER, linewidths=1.4, zorder=4)
+        ax_sched.annotate(f"year {y.year}\nopen {', '.join(y.added)}",
+                          (y.year, y.n_opened), fontsize=8, color=INK2,
+                          xytext=(6, -24), textcoords="offset points")
+    ax_sched.set_ylabel("Open DCs in service")
+    ax_sched.set_yticks(sorted({y.n_opened for y in staged.years}))
+    ax_sched.set_title("The build schedule (staged: open-only, MILP re-solved "
+                       "per year)", pad=10)
+    ax_sched.grid(True)
+    ax_sched.set_axisbelow(True)
+    ax_sched.margins(y=0.25)
+    ax_sched.tick_params(labelbottom=False)
+
+    # Bottom: present value of each year's network cost, staged vs build-ahead.
+    if ahead.feasible:
+        ax_pv.plot([y.year for y in ahead.years],
+                   [y.present_value for y in ahead.years], marker="o",
+                   markersize=4.5, markeredgecolor=PAPER, markeredgewidth=1.0,
+                   color=CONCRETE, linewidth=1.8, linestyle=(0, (4, 2)),
+                   label=f"Build ahead in year 0 (${ahead.npv:,.0f} NPV)",
+                   zorder=3)
+    ax_pv.plot(years, [y.present_value for y in staged.years], marker="o",
+               markersize=4.5, markeredgecolor=PAPER, markeredgewidth=1.0,
+               color=STEEL, linewidth=2.2,
+               label=f"Staged build (${staged.npv:,.0f} NPV)", zorder=4)
+    for y in staged.build_events:
+        ax_pv.scatter([y.year], [y.present_value], s=52, c=AMBER,
+                      edgecolors=PAPER, linewidths=1.4, zorder=5)
+    ax_pv.set_xlabel("Year from today (0 = today)")
+    ax_pv.set_ylabel("Present value of that year's cost ($)", fontsize=8)
+    ax_pv.set_title("What the timing costs: present value per year", pad=10)
+    ax_pv.set_xticks(years)
+    plates.money_axis(ax_pv)
+    # Upper right: both streams fall away to the right, and the wall line and
+    # its label own the upper left, so this is the only corner that stays clear.
+    ax_pv.legend(loc="upper right")
+    ax_pv.grid(True)
+    ax_pv.set_axisbelow(True)
+
+    # The year today's network runs out of capacity, on both panels; labeled
+    # once, on the hero panel. Status red: past this line it cannot serve.
+    if ph.wall_year is not None:
+        for ax in (ax_sched, ax_pv):
+            ax.axvline(ph.wall_year, color=CRITICAL, linestyle=(0, (4, 2)),
+                       linewidth=1.2, zorder=2)
+        ax_sched.annotate(
+            f"today's network full in year {ph.wall_year}\n"
+            f"({ph.committed_wall_growth:.3f}x wall)",
+            (ph.wall_year, ax_sched.get_ylim()[1]), fontsize=8, color=CRITICAL,
+            ha="left", va="top", xytext=(6, -2), textcoords="offset points",
+        )
+    plates.footer(fig, phasing_readout(ph)[0])
+    pdf.savefig(fig)
+    plt.close(fig)
+
+
 def build_pdf(r: PipelineResult, path: str) -> str:
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
     plates.apply_style()
@@ -554,6 +639,7 @@ def build_pdf(r: PipelineResult, path: str) -> str:
         _resilience_chart(pdf, r)
         _service_frontier_chart(pdf, r)
         _growth_chart(pdf, r)
+        _phasing_chart(pdf, r)
         meta = pdf.infodict()
         meta["Title"] = "Supply-Network Optimization (synthetic)"
         meta["Author"] = "Dimitres Kisimov"
@@ -818,6 +904,59 @@ def build_excel(r: PipelineResult, path: str) -> str:
     for col in "BCDEFGHIJKL":
         wg.column_dimensions[col].width = 18
 
+    # BuildSchedule sheet: the phased build plan, one row per policy-year.
+    wp = wb.create_sheet("BuildSchedule")
+    ph = r.phasing
+    wp["A1"] = "Phased build plan (when each DC opens, and the NPV of the timing)"
+    wp["A1"].font = Font(bold=True, size=12)
+    wp["A2"] = (
+        f"ILLUSTRATIVE ASSUMPTIONS: demand +{100.0 * ph.annual_growth:.1f}%/yr, "
+        f"discount rate {100.0 * ph.discount_rate:.1f}%/yr, "
+        f"{ph.horizon_years}-year horizon; year 0 is today and is undiscounted. "
+        "Cost is a RECURRING per-period operating cost, not capex, and a DC "
+        "opens with no construction lead time - NOT a forecast."
+    )
+    hdr = ["policy", "policy_label", "year", "growth_x", "demand_units", "n_dcs",
+           "opened", "added", "closed", "annual_cost_usd", "discount_factor",
+           "present_value_usd"]
+    wp.append([])
+    wp.append(hdr)
+    for c in wp[4]:
+        c.font = bold
+    for key in POLICY_ORDER:
+        policy = ph.policies[key]
+        for y in policy.years:
+            wp.append([
+                key, policy.label, y.year, round(y.growth, 4),
+                round(y.demand_units, 1), y.n_opened, ", ".join(y.opened),
+                ", ".join(y.added), ", ".join(y.removed), round(y.cost, 2),
+                round(y.discount_factor, 6), round(y.present_value, 2),
+            ])
+        if not policy.feasible:
+            wp.append([key, policy.label, policy.first_infeasible_year, "", "",
+                       "", "INFEASIBLE - cannot serve demand", "", "", "", "", ""])
+    wp.append([])
+    wp.append(["NPV summary"])
+    wp.append(["policy", "policy_label", "npv_usd", "feasible",
+               "first_infeasible_year", "site_closures_required", "schedule"])
+    for c in wp[wp.max_row]:
+        c.font = bold
+    for key in POLICY_ORDER:
+        policy = ph.policies[key]
+        wp.append([
+            key, policy.label,
+            round(policy.npv, 2) if policy.feasible else "",
+            "yes" if policy.feasible else "no",
+            policy.first_infeasible_year if not policy.feasible else "",
+            policy.n_closures, schedule_text(policy),
+        ])
+    wp.append([])
+    for line in phasing_readout(ph):
+        wp.append([line])
+    wp.column_dimensions["A"].width = 12
+    for col in "BCDEFGHIJK":
+        wp.column_dimensions[col].width = 18
+
     # Assignment sheet: opened-DC x customer shipped-units matrix.
     wa = wb.create_sheet("Assignment")
     header = ["dc_id \\ cust", *list(r.data.customers["cust_id"])]
@@ -847,6 +986,8 @@ def write_deliverables(r: PipelineResult | None = None, out_dir: str = "delivera
     sf_svg_path = os.path.join(out_dir, "service_frontier.svg")
     growth_csv_path = os.path.join(out_dir, "growth_plan.csv")
     growth_svg_path = os.path.join(out_dir, "growth_expansion.svg")
+    phasing_csv_path = os.path.join(out_dir, "build_schedule.csv")
+    phasing_svg_path = os.path.join(out_dir, "build_schedule.svg")
     build_pdf(r, pdf_path)
     build_excel(r, xlsx_path)
     with open(csv_path, "w", encoding="utf-8", newline="\n") as fh:
@@ -861,6 +1002,10 @@ def write_deliverables(r: PipelineResult | None = None, out_dir: str = "delivera
         fh.write(growth_to_csv(r.growth))
     with open(growth_svg_path, "w", encoding="utf-8", newline="\n") as fh:
         fh.write(growth_to_svg(r.growth))
+    with open(phasing_csv_path, "w", encoding="utf-8", newline="\n") as fh:
+        fh.write(phasing_to_csv(r.phasing))
+    with open(phasing_svg_path, "w", encoding="utf-8", newline="\n") as fh:
+        fh.write(phasing_to_svg(r.phasing))
     return {
         "pdf": pdf_path,
         "xlsx": xlsx_path,
@@ -870,4 +1015,6 @@ def write_deliverables(r: PipelineResult | None = None, out_dir: str = "delivera
         "sf_svg": sf_svg_path,
         "growth_csv": growth_csv_path,
         "growth_svg": growth_svg_path,
+        "phase_csv": phasing_csv_path,
+        "phase_svg": phasing_svg_path,
     }

@@ -213,6 +213,59 @@ the PDF (cost of growth vs the frozen network + the expansion staircase), a
 `deliverables/growth_plan.csv` and a hand-drawn
 `deliverables/growth_expansion.svg`.
 
+## In which *year* does each DC open? A phased build plan (NPV)
+
+The growth sweep says the 4th DC pays at 1.30x demand. A board does not vote on
+a multiplier — it votes on a **year** and a number. So the `phasing` module puts
+a calendar and a discount rate on that staircase: demand grows at a constant
+annual rate, every year's demand is `(1+g)^t` times today's, and each year is
+priced by re-solving the **same** facility MILP with the policy's continuity
+constraint expressed through the **same** `force_open`/`force_closed` pins the
+resilience and growth modules use. Four policies, one horizon:
+
+| Policy | Continuity constraint | Seed-42 result (10 yr, +6%/yr, 10% discount) |
+| --- | --- | ---: |
+| Free redesign | none — may close a site it opened | **$2,598,732** NPV, but **7 site closures** |
+| **Staged build** | open-only; never close | **$2,750,462** NPV — `yr2 +DC0; yr6 +DC3` |
+| Build ahead | staged plan's final design, opened in year 0 | **$3,422,059** NPV |
+| No expansion | today's network held forever | **fails in year 2** |
+
+The plain-language read the tool prints:
+
+- **Today's network runs out of capacity in year 2.** At +6%/yr, demand reaches
+  1.124x — past the 1.088x wall the growth module computes exactly. Holding it
+  unchanged is not a plan, so it is reported as *failing* rather than priced.
+- **The build schedule is two openings: DC0 in year 2, DC3 in year 6**, ending on
+  5 DCs. DC0 arrives three years *earlier* than the free redesign's economic
+  trigger because the staged plan cannot close DC6 to make room — it has to add
+  instead of swap.
+- **Building ahead costs $671,597 more in NPV (+24.4%).** That is the price of
+  readiness, not a mistake the model caught: in this model fixed cost is a
+  **recurring operating cost, not capex**, and a DC opens with **no construction
+  lead time**, so building early can never pay on cost alone.
+- **Never closing a site costs $151,730 NPV (+5.8%)** versus the free-redesign
+  lower bound — which buys that saving with 7 site closures over 10 years, at a
+  closure cost this model charges nothing for. The free line is a bound, not a
+  plan.
+
+Three orderings hold at **every** year by construction, because each policy is
+the same MILP under a strictly tighter pin set: `free ≤ staged ≤ build-ahead`
+and `staged ≤ frozen` wherever frozen is feasible. The tests assert them year by
+year, alongside a solver-free anchor — the capacity-wall year is the first `t`
+with `(1+g)^t` past the growth module's wall, and it must equal the year the
+frozen policy is *observed* to go infeasible.
+
+Honest scope: the annual growth rate and the discount rate are **illustrative
+assumptions, not forecasts**, and both are labelled everywhere they surface.
+Costs are charged at the start of each year (year 0 undiscounted). Growth stays
+**uniform**, inherited from the growth module. There is no capex, no construction
+lead time and no land escalation in this model — any of which could reverse the
+early-vs-late answer. Only the DC echelon is re-sited; by year 9 demand is 1.69x
+today's against a 2.74x candidate-pool ceiling and a 2.10x plant ceiling.
+`--deliverables` adds plate 09 to the PDF, a `BuildSchedule` sheet to the
+workbook, and writes `deliverables/build_schedule.csv` and a hand-drawn
+`deliverables/build_schedule.svg`.
+
 ## How to run it
 
 ```bash
@@ -227,11 +280,11 @@ python -m supplynet --service-level 0.98   # move the base service target
 The deliverables step writes an executive PDF (cover with disclaimer and
 headline savings, a network map of opened DCs and flows, a cost-breakdown bar,
 a safety-stock pooling chart, a cost-vs-CO2 Pareto page, a disruption-resilience
-page, an inventory service-level-frontier page, and a demand-growth expansion
-page) plus an Excel workbook (Summary, Facilities, Flows, SafetyStock,
-Customers, CO2Sensitivity, Resilience, ServiceFrontier, Growth, Assignment) and
-the CO2 frontier, the service frontier and the growth plan as a CSV and a
-hand-drawn SVG each.
+page, an inventory service-level-frontier page, a demand-growth expansion page,
+and a phased-build-schedule page) plus an Excel workbook (Summary, Facilities,
+Flows, SafetyStock, Customers, CO2Sensitivity, Resilience, ServiceFrontier,
+Growth, BuildSchedule, Assignment) and the CO2 frontier, the service frontier,
+the growth plan and the build schedule as a CSV and a hand-drawn SVG each.
 
 Run the checks with `python -m ruff check .` and `python -m pytest -q`.
 
@@ -301,6 +354,18 @@ candidate capacities / base demand) — an expansion trigger below that ceiling 
 economic; at it, it is forced. Uniform growth, deterministic demand and flat
 costs are stated assumptions, not claims about real demand.
 
+**7. Phased build planning (timing + NPV).** I map the growth staircase onto a
+calendar — year `t` carries `(1+g)^t` times today's demand — and price four build
+policies by re-solving the same facility MILP each year under a different
+continuity constraint, using the same two pins: unconstrained (free redesign),
+with everything already open pinned open (staged, open-only), with one fixed
+design pinned open and the rest pinned shut (build-ahead and frozen). NPV is the
+discounted sum of those annual costs, year 0 undiscounted. Because the feasible
+sets nest, `free ≤ staged ≤ build-ahead` and `staged ≤ frozen` hold at every
+year by construction rather than by observation, and the capacity-wall year has
+a closed form that cross-checks the solver. The growth rate and the discount
+rate are labelled illustrative assumptions throughout.
+
 ## Honesty notes
 
 - Data is synthetic and seeded. No real customers, costs, or locations.
@@ -325,6 +390,16 @@ costs are stated assumptions, not claims about real demand.
   scale economies, no inflation. The plant echelon is not re-solved in the siting
   sweep; its ceiling is reported separately. Expansion triggers are model-based
   planning estimates on synthetic data, not forecasts.
+- The phased build plan's **annual growth rate (6%/yr) and discount rate
+  (10%/yr) are illustrative assumptions, not forecasts**, and the horizon is a
+  choice. More important: this package models fixed cost as a **recurring
+  per-period operating cost, not one-time capex**, and a DC opens with **no
+  construction lead time**. Under that cost structure building ahead can never
+  pay on cost alone, so the build-ahead premium is the price of readiness rather
+  than a finding that early building is wrong — a model carrying capex,
+  construction lead times or land escalation could reverse the sign. The
+  free-redesign line closes live DCs at zero cost, which is why it is reported
+  as a lower bound and its closure count is printed beside it.
 
 ## Layout
 
@@ -338,11 +413,14 @@ supplynet/
   resilience.py      single-DC-outage (N-1) screen + cheapest recovery
   service_frontier.py inventory service-level frontier (safety stock/cost vs service)
   growth.py          demand-growth capacity plan (expansion triggers + headroom)
+  phasing.py         phased build plan (when each DC opens + NPV of the timing)
+  atlas.py           the "network atlas" design system: materials palette + SVG chrome
+  plates.py          matplotlib side of the same plate system (PDF pages)
   pipeline.py        end-to-end orchestration
-  exports.py         executive PDF + Excel workbook + CO2/service/growth CSV & SVG
+  exports.py         executive PDF + Excel workbook + four CSV & SVG pairs
   __main__.py        CLI
-tests/            71 tests (data, facility, flow, safety stock, co2, resilience,
-                  service frontier, growth, exports)
+tests/            93 tests (data, facility, flow, safety stock, co2, resilience,
+                  service frontier, growth, phasing, exports)
 docs/BUSINESS_CASE.md
 ```
 

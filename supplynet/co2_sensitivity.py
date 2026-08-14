@@ -291,16 +291,16 @@ def to_svg(sens: Co2Sensitivity) -> str:
     if len(pareto) >= 2:
         poly = " ".join(f"{px(d.cost):.1f},{py(d.co2_t):.1f}" for d in pareto)
         parts.append(
-            f'<polyline points="{poly}" fill="none" stroke="{atlas.BLUE}" '
+            f'<polyline points="{poly}" fill="none" stroke="{atlas.STEEL}" '
             f'stroke-opacity="0.6" stroke-width="1.5"/>'
         )
 
-    # Pareto designs wear blue, dominated designs recede to gray; each point
+    # Pareto designs wear steel, dominated designs recede to concrete; each point
     # carries a white surface ring and its open-DC count as a direct label.
     cost_opt = sens.cost_optimal
     for d in sens.designs:
         cx, cy = px(d.cost), py(d.co2_t)
-        color = atlas.BLUE if d.is_pareto else atlas.SERIES_GRAY
+        color = atlas.STEEL if d.is_pareto else atlas.CONCRETE
         if d is cost_opt:
             parts.append(
                 f'<circle cx="{cx:.1f}" cy="{cy:.1f}" r="7" fill="{color}" '
@@ -324,14 +324,14 @@ def to_svg(sens: Co2Sensitivity) -> str:
     # Legend (top-right of the plot, where the frontier leaves whitespace).
     lx, ly = ml + pw - 118, mt + 12
     parts.append(
-        f'<circle cx="{lx}" cy="{ly}" r="5" fill="{atlas.BLUE}" '
+        f'<circle cx="{lx}" cy="{ly}" r="5" fill="{atlas.STEEL}" '
         f'stroke="{atlas.PAPER}" stroke-width="2"/>'
         f'<text x="{lx + 11}" y="{ly + 4}" font-size="10" fill="{atlas.INK2}">'
         f'Pareto-optimal</text>'
     )
     if any(not d.is_pareto for d in sens.designs):
         parts.append(
-            f'<circle cx="{lx}" cy="{ly + 18}" r="5" fill="{atlas.SERIES_GRAY}" '
+            f'<circle cx="{lx}" cy="{ly + 18}" r="5" fill="{atlas.CONCRETE}" '
             f'stroke="{atlas.PAPER}" stroke-width="2"/>'
             f'<text x="{lx + 11}" y="{ly + 22}" font-size="10" '
             f'fill="{atlas.INK2}">dominated</text>'

@@ -325,43 +325,43 @@ def to_svg(frontier: ServiceFrontier) -> str:
         f'Safety-stock carrying cost ($/yr, modeled)</text>'
     )
 
-    # Decentralized recedes to dashed gray; the pooled network wears blue.
+    # Decentralized recedes to dashed concrete; the pooled network wears steel.
     dec_poly = " ".join(f"{px(p.service_level):.1f},{py(c):.1f}"
                         for p, c in zip(pts, dec_cost, strict=True))
     net_poly = " ".join(f"{px(p.service_level):.1f},{py(c):.1f}"
                         for p, c in zip(pts, net_cost, strict=True))
     parts.append(
         f'<polyline points="{dec_poly}" fill="none" '
-        f'stroke="{atlas.SERIES_GRAY}" stroke-width="1.8" '
+        f'stroke="{atlas.CONCRETE}" stroke-width="1.8" '
         f'stroke-dasharray="5 3"/>'
     )
     parts.append(
-        f'<polyline points="{net_poly}" fill="none" stroke="{atlas.BLUE}" '
+        f'<polyline points="{net_poly}" fill="none" stroke="{atlas.STEEL}" '
         f'stroke-width="2.2"/>'
     )
     for p, c in zip(pts, dec_cost, strict=True):
         parts.append(
             f'<circle cx="{px(p.service_level):.1f}" cy="{py(c):.1f}" r="3.6" '
-            f'fill="{atlas.SERIES_GRAY}" stroke="{atlas.PAPER}" '
+            f'fill="{atlas.CONCRETE}" stroke="{atlas.PAPER}" '
             f'stroke-width="1.6"/>'
         )
     for p, c in zip(pts, net_cost, strict=True):
         parts.append(
             f'<circle cx="{px(p.service_level):.1f}" cy="{py(c):.1f}" r="4.2" '
-            f'fill="{atlas.BLUE}" stroke="{atlas.PAPER}" stroke-width="1.8"/>'
+            f'fill="{atlas.STEEL}" stroke="{atlas.PAPER}" stroke-width="1.8"/>'
         )
 
     # legend (upper left, where both curves are still low)
     lx, ly = ml + 14, mt + 16
     parts.append(
         f'<line x1="{lx}" y1="{ly}" x2="{lx + 22}" y2="{ly}" '
-        f'stroke="{atlas.BLUE}" stroke-width="2.2"/>'
+        f'stroke="{atlas.STEEL}" stroke-width="2.2"/>'
         f'<text x="{lx + 28}" y="{ly + 4}" font-size="10" fill="{atlas.INK2}">'
         f'Network (pooled by opened DCs)</text>'
     )
     parts.append(
         f'<line x1="{lx}" y1="{ly + 18}" x2="{lx + 22}" y2="{ly + 18}" '
-        f'stroke="{atlas.SERIES_GRAY}" stroke-width="1.8" '
+        f'stroke="{atlas.CONCRETE}" stroke-width="1.8" '
         f'stroke-dasharray="5 3"/>'
         f'<text x="{lx + 28}" y="{ly + 22}" font-size="10" fill="{atlas.INK2}">'
         f'Decentralized (one stock point / zone)</text>'

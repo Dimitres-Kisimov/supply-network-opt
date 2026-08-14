@@ -1,49 +1,84 @@
 """The "network atlas" design system: shared tokens + deterministic SVG plates.
 
-Every visual deliverable -- the eight PDF pages and the three hand-drawn SVGs --
+Every visual deliverable -- the nine PDF pages and the four hand-drawn SVGs --
 is a numbered *plate* in one atlas: the same masthead, hairline rules, type
 scale, palette and honest designed captions. This module holds the pieces that
 must stay identical across media:
 
-  * the color tokens (a validated light-surface palette -- see below);
+  * the color tokens (a validated light-surface materials palette -- see below);
   * the plate roster (numbers + short names) so PDF pages and SVG exports
     carry consistent headers; and
   * pure-string SVG scaffolding (header, grid, footer) with **no plotting
     library, no RNG and no wall-clock**, so committed SVGs stay byte-stable.
 
-Palette provenance: the categorical hues are the dataviz reference palette
-(slot 1 blue, slot 2 orange, slot 3 aqua), machine-validated against a white
-surface -- lightness band, chroma floor, adjacent-pair CVD separation >= 8
-(OKLab x100) and normal-vision separation >= 15 all PASS. Series identity is
-never color-alone: every series here also carries a legend entry, a direct
-label or a distinct dash/marker. Emphasis is ink-vs-gray: the optimized
-network wears blue/ink, baselines and dominated designs wear gray. Status red
-is reserved for genuinely bad states (capacity wall, unmet demand) and always
-ships with a text label.
+PALETTE -- a materials palette, because the subject is physical. A supply
+network is concrete yards, steel racking, kraft-board pallets, painted hazard
+lines and trucks on asphalt, so the atlas is toned in those materials rather
+than in abstract technical blues. Each material carries one job and keeps it
+across every plate:
+
+  * CONCRETE (neutral greys) -- the ground the network sits on: gridlines,
+    plate rules, customer zones, and any baseline or dominated design that must
+    recede;
+  * STEEL -- built structure and the decision itself: the opened DCs, the
+    optimized network, the hero series on every plate;
+  * KRAFT -- goods: the plants that make them, the transport cost of moving
+    them, and (in its light step) the flow lines that carry them;
+  * PATINA (weathered copper) -- the fully-centralized pooling regime, the one
+    alternative design that is neither the hero nor a baseline;
+  * AMBER -- painted safety yellow, reserved for ATTENTION: an expansion
+    trigger, a build year, a threshold. Always beside a text label;
+  * SIGNAL RED (``CRITICAL``) -- reserved for genuinely bad states only
+    (capacity wall, unmet demand). Always beside a text label.
+
+Provenance -- machine-validated, not eyeballed. The three categorical slots
+``STEEL, KRAFT, PATINA`` were run through the dataviz palette validator against
+this atlas's own white print surface, on the *all-pairs* pairlist (the network
+map is a scatter form, where any two marks can end up neighbours)::
+
+    validate_palette.js "#1b5586,#a9682a,#38a380" --surface "#ffffff" \
+        --mode light --pairs all
+    [PASS] Lightness band      all 3 inside L 0.43-0.77
+    [PASS] Chroma floor        all 3 >= 0.1
+    [PASS] CVD separation      worst all-pairs #38a380 <-> #a9682a
+                               dE 10.4 (deutan) . tritan 20.3
+    [PASS] Normal-vision floor worst all-pairs #38a380 <-> #a9682a dE 19.2
+    [PASS] Contrast vs surface all 3 >= 3:1
+    -> ALL CHECKS PASS
+
+AMBER is a status-style ATTENTION token, not a fourth series: measured against
+the categorical slots it collides with KRAFT (normal-vision dE 7.4), so the two
+never appear on the same plate, and amber always ships with a text label -- the
+documented icon-plus-label mitigation. ``tests/test_exports.py`` asserts both
+the hexes and the no-amber-beside-kraft rule on the generated artwork.
+
+Series identity is never color-alone: every series also carries a legend entry,
+a direct label or a distinct dash/marker, and every mark colour clears 3:1 on
+the white surface.
 """
 
 import math
 
 # --- Surfaces and ink (light / print) ---------------------------------------
-PAPER = "#ffffff"  # page + plot surface
-INK = "#0b0b0b"  # primary text, strongest emphasis
+PAPER = "#ffffff"  # page + plot surface: paper
+INK = "#0b0b0b"  # asphalt black: primary text, strongest emphasis
 INK2 = "#52514e"  # secondary text (captions, axis titles)
-MUTED = "#898781"  # muted text (ticks, kickers) and de-emphasized series
-GRID = "#e1e0d9"  # hairline gridlines, solid, recessive
-RULE = "#c3c2b7"  # axis baselines and plate rules
+MUTED = "#898781"  # muted text (ticks, kickers)
+GRID = "#e3e2df"  # concrete dust: hairline gridlines, solid, recessive
+RULE = "#c2c1bc"  # concrete edge: axis baselines and plate rules
 
-# --- Series hues (validated categorical slots on white) ---------------------
-BLUE = "#2a78d6"  # slot 1: the optimized network (MILP), the hero entity
-BLUE_DARK = "#1c5cab"  # darker sequential step of the same blue
-BLUE_SOFT = "#6da7ec"  # lighter sequential step (stacked-bar companion)
-BLUE_FLOW = "#9ec5f4"  # light sequential step: flow lines on the map
-ORANGE = "#eb6834"  # slot 2: plants / inbound echelon
-AQUA = "#1baf7a"  # slot 3: fully-centralized pooling regime
-SERIES_GRAY = "#898781"  # de-emphasis series: greedy, frozen, dominated
-GRAY_FILL = "#c3c2b7"  # lighter gray step (baseline bar segments)
+# --- Materials (validated categorical slots on the white surface) -----------
+STEEL = "#1b5586"  # slot 1: built structure -- opened DCs, the optimized network
+STEEL_DARK = "#123c5e"  # darker steel step (fixed opening cost, deep emphasis)
+KRAFT = "#a9682a"  # slot 2: goods -- plants, and the cost of moving product
+KRAFT_LIGHT = "#d3a878"  # light kraft step: goods in motion (flow lines)
+PATINA = "#38a380"  # slot 3: weathered copper -- fully-centralized pooling
+CONCRETE = "#82817d"  # de-emphasis series: greedy, frozen, dominated, zones
+CONCRETE_FILL = "#c2c1bc"  # lighter concrete step (baseline bar segments)
 
-# --- Status (reserved -- never a series color) ------------------------------
-CRITICAL = "#d03b3b"  # capacity wall, unmet demand; always labeled in text
+# --- Attention and status (reserved -- never a plain series color) ----------
+AMBER = "#c07d12"  # painted safety yellow: triggers, build years, thresholds
+CRITICAL = "#d03b3b"  # signal red: capacity wall, unmet demand; always labeled
 GOOD_TEXT = "#006300"  # success text token (savings line on the cover)
 
 SVG_FONT = "Segoe UI, Arial, sans-serif"
@@ -59,6 +94,7 @@ PLATES = {
     6: "N-1 RESILIENCE",
     7: "SERVICE FRONTIER",
     8: "GROWTH STAIRCASE",
+    9: "BUILD SCHEDULE",
 }
 N_PLATES = len(PLATES)
 

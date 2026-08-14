@@ -16,6 +16,7 @@ except (AttributeError, ValueError):
 
 from supplynet.co2_sensitivity import tradeoff_readout  # noqa: E402
 from supplynet.growth import growth_readout  # noqa: E402
+from supplynet.phasing import POLICY_ORDER, phasing_readout, schedule_text  # noqa: E402
 from supplynet.pipeline import run_pipeline  # noqa: E402
 from supplynet.resilience import resilience_readout  # noqa: E402
 from supplynet.service_frontier import frontier_readout  # noqa: E402
@@ -140,6 +141,34 @@ def _report(r) -> str:
         prev_set = set(pt.opened)
     lines.append("")
     lines.extend("  " + s for s in growth_readout(g))
+
+    ph = r.phasing
+    staged = ph.policies["staged"]
+    lines.extend([
+        "",
+        "-- Phased build plan (when each DC opens + NPV of the timing) --",
+        f"  ILLUSTRATIVE assumptions: demand +{100.0 * ph.annual_growth:.0f}%/yr, "
+        f"discount {100.0 * ph.discount_rate:.0f}%/yr, "
+        f"{ph.horizon_years}-yr horizon (year 0 undiscounted). Not a forecast.",
+        f"  {'year':>4}  {'growth':>6}  {'demand':>7}  {'#DCs':>4}  "
+        f"{'annual cost':>11}  {'disc':>5}  {'present value':>13}  opens",
+    ])
+    for y in staged.years:
+        opens = "+" + ", ".join(y.added) if y.added else ""
+        lines.append(
+            f"  {y.year:>4}  {y.growth:>5.3f}x  {y.demand_units:>7,.0f}  "
+            f"{y.n_opened:>4}  {y.cost:>11,.0f}  {y.discount_factor:>5.3f}  "
+            f"{y.present_value:>13,.0f}  {opens}"
+        )
+    lines.append("")
+    lines.append(f"  {'policy':>7}  {'NPV($)':>12}  {'feasible':>8}  build schedule")
+    for key in POLICY_ORDER:
+        p = ph.policies[key]
+        npv = f"{p.npv:,.0f}" if p.feasible else "- fails -"
+        feas = "yes" if p.feasible else f"no (yr {p.first_infeasible_year})"
+        lines.append(f"  {key:>7}  {npv:>12}  {feas:>8}  {schedule_text(p)}")
+    lines.append("")
+    lines.extend("  " + s for s in phasing_readout(ph))
     lines.append("=" * 66)
     return "\n".join(lines)
 
