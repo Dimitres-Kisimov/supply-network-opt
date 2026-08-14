@@ -342,126 +342,201 @@ def to_csv(plan: GrowthPlan) -> str:
 
 
 def to_svg(plan: GrowthPlan) -> str:
-    """Hand-drawn, deterministic SVG of cost vs demand growth.
+    """Hand-drawn, deterministic SVG of the growth plan as two stacked panels.
 
-    Re-optimized total cost across the sweep (open-DC count labelled where it
-    steps up), the frozen committed network's cost until its capacity wall, and
-    the wall itself as a vertical line. Plain XML from the numbers -- no plotting
-    library, no RNG, no timestamp -- so the committed file is byte-stable.
+    Atlas plate 08. The hero panel on top is the expansion staircase -- the
+    optimal open-DC count stepping up as demand grows, with each trigger
+    labelled and the committed capacity wall marked. Beneath it, on the same
+    growth axis, the re-optimized cost sweep against the frozen committed
+    network. Two stacked panels, never a dual axis. Plain XML from the numbers
+    -- no plotting library, no RNG, no timestamp -- so the committed file is
+    byte-stable.
     """
-    w, h = 640, 420
-    ml, mr, mt, mb = 84, 24, 48, 60  # margins
-    pw, ph = w - ml - mr, h - mt - mb
+    from supplynet import atlas
+
+    w, h = 720, 640
+    ml, mr = 92, 28
+    pw = w - ml - mr
+    # Panel frames: staircase (hero) on top, cost sweep beneath.
+    t1_y, mt1, pb1 = 100, 116, 288
+    t2_y, mt2, pb2 = 330, 346, 540
 
     pts = plan.points
     gmin = pts[0].growth
     gmax = pts[-1].growth
     grange = gmax - gmin or 1.0
-    cmax = max(p.cost for p in pts) or 1.0
 
     def px(g: float) -> float:
         return ml + pw * (g - gmin) / grange
 
-    def py(cost: float) -> float:
-        return mt + ph * (1.0 - cost / cmax)
+    counts = [p.n_opened for p in pts]
+    nlo = min(counts) - 0.5
+    nhi = max(counts) + 0.8
+    cmax = max(p.cost for p in pts) or 1.0
+    chi = cmax * 1.06
 
-    parts = [
-        f'<svg xmlns="http://www.w3.org/2000/svg" width="{w}" height="{h}" '
-        f'viewBox="0 0 {w} {h}" font-family="Segoe UI, Arial, sans-serif">',
-        f'<rect width="{w}" height="{h}" fill="#ffffff"/>',
-        f'<text x="{w / 2:.0f}" y="24" text-anchor="middle" font-size="16" '
-        f'font-weight="bold" fill="#1a1a1a">Demand growth: expansion triggers and '
-        f'the committed capacity wall (synthetic)</text>',
-        # axes
-        f'<line x1="{ml}" y1="{mt}" x2="{ml}" y2="{mt + ph}" stroke="#333" '
-        f'stroke-width="1.2"/>',
-        f'<line x1="{ml}" y1="{mt + ph}" x2="{ml + pw}" y2="{mt + ph}" '
-        f'stroke="#333" stroke-width="1.2"/>',
-        f'<text x="{ml + pw / 2:.0f}" y="{h - 20}" text-anchor="middle" '
-        f'font-size="12" fill="#333">Demand growth (x today) -&gt;</text>',
-        f'<text x="18" y="{mt + ph / 2:.0f}" text-anchor="middle" font-size="12" '
-        f'fill="#333" transform="rotate(-90 18 {mt + ph / 2:.0f})">'
-        f'Total network cost ($, fixed + outbound transport)</text>',
-        # axis end labels
-        f'<text x="{ml}" y="{mt + ph + 16}" text-anchor="start" font-size="10" '
-        f'fill="#666">{gmin:.2f}x</text>',
-        f'<text x="{ml + pw}" y="{mt + ph + 16}" text-anchor="end" font-size="10" '
-        f'fill="#666">{gmax:.2f}x</text>',
-        f'<text x="{ml - 6}" y="{mt + 8:.0f}" text-anchor="end" font-size="10" '
-        f'fill="#666">${cmax:,.0f}</text>',
-        f'<text x="{ml - 6}" y="{mt + ph:.0f}" text-anchor="end" font-size="10" '
-        f'fill="#666">$0</text>',
-    ]
+    def py_n(n: float) -> float:
+        return mt1 + (pb1 - mt1) * (1.0 - (n - nlo) / (nhi - nlo))
 
-    # Committed capacity wall (vertical line), if it falls inside the swept range.
+    def py_c(cost: float) -> float:
+        return mt2 + (pb2 - mt2) * (1.0 - cost / chi)
+
+    parts = atlas.svg_open(w, h)
+    atlas.svg_header(parts, w, 8, "Demand growth: expansion triggers and the "
+                     "committed capacity wall (synthetic)")
+
+    # ---- Panel 1 (hero): the expansion staircase --------------------------
+    parts.append(
+        f'<text x="{ml}" y="{t1_y}" font-size="11" font-weight="bold" '
+        f'fill="{atlas.INK}">The expansion staircase (MILP re-solved per level)'
+        f'</text>'
+    )
+    atlas.svg_grid_y(parts, [float(n) for n in sorted(set(counts))], py_n,
+                     ml, ml + pw, lambda t: f"{t:.0f}")
+    parts.append(
+        f'<text x="30" y="{(mt1 + pb1) / 2:.0f}" text-anchor="middle" '
+        f'font-size="10.5" fill="{atlas.INK2}" '
+        f'transform="rotate(-90 30 {(mt1 + pb1) / 2:.0f})">'
+        f'Optimal number of open DCs</text>'
+    )
+    atlas.svg_baseline(parts, ml, ml + pw, pb1)
+
+    # The committed capacity wall goes down first, under the data marks; its
+    # panel-2 twin is drawn with that panel's chrome below.
     wall = plan.committed_wall_growth
-    if gmin <= wall <= gmax:
+    wall_shown = gmin <= wall <= gmax
+    if wall_shown:
         wx = px(wall)
         parts.append(
-            f'<line x1="{wx:.1f}" y1="{mt}" x2="{wx:.1f}" y2="{mt + ph}" '
-            f'stroke="#c44e52" stroke-width="1.2" stroke-dasharray="2 3"/>'
+            f'<line x1="{wx:.1f}" y1="{mt1}" x2="{wx:.1f}" y2="{pb1}" '
+            f'stroke="{atlas.CRITICAL}" stroke-width="1.2" '
+            f'stroke-dasharray="2 3"/>'
         )
         parts.append(
-            f'<text x="{wx + 4:.1f}" y="{mt + ph - 8:.1f}" font-size="9" '
-            f'fill="#c44e52">committed wall {wall:.3f}x '
+            f'<text x="{wx + 5:.1f}" y="{mt1 + 12:.1f}" font-size="9" '
+            f'fill="{atlas.CRITICAL}">committed wall {wall:.3f}x '
             f'({plan.committed_headroom_pct:+.1f}%)</text>'
         )
 
-    # Frozen committed network cost, while feasible.
+    # Step path (post-step: the count holds until the next level).
+    step_pts = [(px(pts[0].growth), py_n(pts[0].n_opened))]
+    for prev, nxt in zip(pts, pts[1:], strict=False):
+        step_pts.append((px(nxt.growth), py_n(prev.n_opened)))
+        step_pts.append((px(nxt.growth), py_n(nxt.n_opened)))
+    poly = " ".join(f"{x:.1f},{y:.1f}" for x, y in step_pts)
+    parts.append(
+        f'<polyline points="{poly}" fill="none" stroke="{atlas.BLUE}" '
+        f'stroke-width="2.6" stroke-linejoin="round"/>'
+    )
+
+    # Start label + one designed label per expansion trigger.
+    parts.append(
+        f'<circle cx="{px(pts[0].growth):.1f}" cy="{py_n(pts[0].n_opened):.1f}" '
+        f'r="4.5" fill="{atlas.BLUE}" stroke="{atlas.PAPER}" stroke-width="1.8"/>'
+    )
+    parts.append(
+        f'<text x="{px(pts[0].growth) + 7:.1f}" '
+        f'y="{py_n(pts[0].n_opened) - 9:.1f}" font-size="9.5" '
+        f'fill="{atlas.INK2}">{pts[0].n_opened} DCs</text>'
+    )
+    for p in plan.expansion_triggers:
+        x, y = px(p.growth), py_n(p.n_opened)
+        parts.append(
+            f'<circle cx="{x:.1f}" cy="{y:.1f}" r="4.5" fill="{atlas.BLUE}" '
+            f'stroke="{atlas.PAPER}" stroke-width="1.8"/>'
+        )
+        anchor, dx = ("start", 8) if x < ml + pw * 0.78 else ("end", -8)
+        parts.append(
+            f'<text x="{x + dx:.1f}" y="{y + 17:.1f}" text-anchor="{anchor}" '
+            f'font-size="9.5" fill="{atlas.INK2}">DC #{p.n_opened} pays at '
+            f'{p.growth:.2f}x</text>'
+        )
+
+    # ---- Panel 2: cost of growth, redesign vs frozen ----------------------
+    parts.append(
+        f'<text x="{ml}" y="{t2_y}" font-size="11" font-weight="bold" '
+        f'fill="{atlas.INK}">Cost of growth: redesign vs frozen network</text>'
+    )
+    atlas.svg_grid_y(parts, atlas.nice_ticks(0.0, chi, 5), py_c, ml, ml + pw,
+                     atlas.money)
+    parts.append(
+        f'<text x="30" y="{(mt2 + pb2) / 2:.0f}" text-anchor="middle" '
+        f'font-size="10.5" fill="{atlas.INK2}" '
+        f'transform="rotate(-90 30 {(mt2 + pb2) / 2:.0f})">'
+        f'Total network cost ($, fixed + outbound transport)</text>'
+    )
+    atlas.svg_baseline(parts, ml, ml + pw, pb2)
+    atlas.svg_ticks_x(parts, atlas.nice_ticks(gmin, gmax, 6), px, pb2,
+                      lambda t: f"{t:.1f}x")
+    parts.append(
+        f'<text x="{ml + pw / 2:.0f}" y="{pb2 + 36}" text-anchor="middle" '
+        f'font-size="10.5" fill="{atlas.INK2}">Demand growth (x today) '
+        f'-&gt;</text>'
+    )
+
+    # Panel-2 twin of the capacity wall, under the data marks.
+    if wall_shown:
+        parts.append(
+            f'<line x1="{px(wall):.1f}" y1="{mt2}" x2="{px(wall):.1f}" '
+            f'y2="{pb2}" stroke="{atlas.CRITICAL}" stroke-width="1.2" '
+            f'stroke-dasharray="2 3"/>'
+        )
+
+    # Frozen committed network cost (dashed gray), while feasible.
     committed = [p for p in pts if p.committed_feasible]
     if committed:
         com_poly = " ".join(
-            f"{px(p.growth):.1f},{py(p.committed_cost):.1f}" for p in committed
+            f"{px(p.growth):.1f},{py_c(p.committed_cost):.1f}" for p in committed
         )
         parts.append(
-            f'<polyline points="{com_poly}" fill="none" stroke="#c44e52" '
-            f'stroke-width="1.8" stroke-dasharray="5 3"/>'
+            f'<polyline points="{com_poly}" fill="none" '
+            f'stroke="{atlas.SERIES_GRAY}" stroke-width="1.8" '
+            f'stroke-dasharray="5 3"/>'
         )
-        for p in committed:
-            parts.append(
-                f'<circle cx="{px(p.growth):.1f}" cy="{py(p.committed_cost):.1f}" '
-                f'r="3.2" fill="#c44e52"/>'
-            )
 
-    # Re-optimized cost curve with the open-DC count labelled where it steps up.
-    opt_poly = " ".join(f"{px(p.growth):.1f},{py(p.cost):.1f}" for p in pts)
+    # Re-optimized cost curve (blue), triggers emphasized.
+    opt_poly = " ".join(f"{px(p.growth):.1f},{py_c(p.cost):.1f}" for p in pts)
     parts.append(
-        f'<polyline points="{opt_poly}" fill="none" stroke="#1f9d55" '
-        f'stroke-width="2.0"/>'
+        f'<polyline points="{opt_poly}" fill="none" stroke="{atlas.BLUE}" '
+        f'stroke-width="2.2"/>'
     )
     triggers = {id(p) for p in plan.expansion_triggers}
     for p in pts:
         is_trigger = id(p) in triggers
-        r = 4.5 if is_trigger or p is pts[0] else 2.6
+        r = 4.2 if is_trigger or p is pts[0] else 2.6
         parts.append(
-            f'<circle cx="{px(p.growth):.1f}" cy="{py(p.cost):.1f}" r="{r}" '
-            f'fill="#1f9d55" stroke="#222" stroke-width="0.7"/>'
+            f'<circle cx="{px(p.growth):.1f}" cy="{py_c(p.cost):.1f}" r="{r}" '
+            f'fill="{atlas.BLUE}" stroke="{atlas.PAPER}" stroke-width="1.4"/>'
         )
-        if is_trigger or p is pts[0]:
-            parts.append(
-                f'<text x="{px(p.growth):.1f}" y="{py(p.cost) - 9:.1f}" '
-                f'text-anchor="middle" font-size="9" fill="#222">'
-                f'{p.n_opened} DCs</text>'
-            )
 
-    # legend
-    lx, ly = ml + 12, mt + 6
+    # Up to the wall the frozen cost coincides with the re-optimized cost, so
+    # the frozen series rides ON the blue line: hollow gray rings drawn on top
+    # keep it visible exactly where the two series overlap.
+    for p in committed:
+        parts.append(
+            f'<circle cx="{px(p.growth):.1f}" '
+            f'cy="{py_c(p.committed_cost):.1f}" r="5.2" fill="none" '
+            f'stroke="{atlas.SERIES_GRAY}" stroke-width="1.6"/>'
+        )
+
+    # legend (upper left of the cost panel, clear of the wall line)
+    lx, ly = ml + 96, mt2 + 14
     parts.append(
-        f'<line x1="{lx}" y1="{ly}" x2="{lx + 22}" y2="{ly}" stroke="#1f9d55" '
-        f'stroke-width="2.0"/>'
-        f'<text x="{lx + 28}" y="{ly + 4}" font-size="10" fill="#333">'
-        f'Re-optimized at each demand level (label = DCs opened)</text>'
+        f'<line x1="{lx}" y1="{ly}" x2="{lx + 22}" y2="{ly}" '
+        f'stroke="{atlas.BLUE}" stroke-width="2.2"/>'
+        f'<text x="{lx + 28}" y="{ly + 4}" font-size="10" fill="{atlas.INK2}">'
+        f'Re-optimized at each demand level</text>'
     )
     parts.append(
-        f'<line x1="{lx}" y1="{ly + 16}" x2="{lx + 22}" y2="{ly + 16}" '
-        f'stroke="#c44e52" stroke-width="1.8" stroke-dasharray="5 3"/>'
-        f'<text x="{lx + 28}" y="{ly + 20}" font-size="10" fill="#333">'
+        f'<line x1="{lx}" y1="{ly + 18}" x2="{lx + 22}" y2="{ly + 18}" '
+        f'stroke="{atlas.SERIES_GRAY}" stroke-width="1.8" '
+        f'stroke-dasharray="5 3"/>'
+        f'<text x="{lx + 28}" y="{ly + 22}" font-size="10" fill="{atlas.INK2}">'
         f'Committed network frozen (until its capacity wall)</text>'
     )
-    parts.append(
-        f'<text x="{ml}" y="{h - 6}" font-size="9" fill="#999">Uniform growth, '
-        f'deterministic demand, flat costs; DC capacity is the only hard limit. '
-        f'Synthetic, seeded data.</text>'
-    )
-    parts.append("</svg>")
-    return "\n".join(parts) + "\n"
+
+    atlas.svg_footer(parts, w, h, [
+        "Uniform growth, deterministic demand, flat costs; DC capacity is the "
+        "only hard limit. Synthetic, seeded data."
+    ])
+    return atlas.svg_close(parts)

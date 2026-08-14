@@ -268,13 +268,19 @@ def to_csv(frontier: ServiceFrontier) -> str:
 def to_svg(frontier: ServiceFrontier) -> str:
     """Hand-drawn, deterministic SVG of carrying cost vs service level.
 
-    Two curves -- decentralized and network (pooled) annual carrying cost -- across
-    the swept service levels. Built as plain XML from the numbers, with no plotting
-    library, no RNG and no timestamp, so the committed file is byte-stable.
+    Atlas plate 07: two curves -- decentralized and network (pooled) annual
+    carrying cost -- across the swept service levels, on the shared plate
+    chrome from :mod:`supplynet.atlas`. Built as plain XML from the numbers,
+    with no plotting library, no RNG and no timestamp, so the committed file
+    is byte-stable.
     """
-    w, h = 640, 420
-    ml, mr, mt, mb = 84, 24, 48, 60  # margins
-    pw, ph = w - ml - mr, h - mt - mb
+    from supplynet import atlas
+
+    w, h = 720, 500
+    ml, mr = 92, 28
+    mt = atlas.HEADER_H
+    pb = 400  # plot baseline (x axis)
+    pw, ph = w - ml - mr, pb - mt
 
     pts = frontier.points
     rate = frontier.holding_rate_per_year
@@ -292,78 +298,77 @@ def to_svg(frontier: ServiceFrontier) -> str:
     def py(cost: float) -> float:
         return mt + ph * (1.0 - cost / cmax)
 
-    parts = [
-        f'<svg xmlns="http://www.w3.org/2000/svg" width="{w}" height="{h}" '
-        f'viewBox="0 0 {w} {h}" font-family="Segoe UI, Arial, sans-serif">',
-        f'<rect width="{w}" height="{h}" fill="#ffffff"/>',
-        f'<text x="{w / 2:.0f}" y="24" text-anchor="middle" font-size="16" '
-        f'font-weight="bold" fill="#1a1a1a">Inventory carrying cost vs service '
-        f'level (synthetic; illustrative cost factors)</text>',
-        # axes
-        f'<line x1="{ml}" y1="{mt}" x2="{ml}" y2="{mt + ph}" stroke="#333" '
-        f'stroke-width="1.2"/>',
-        f'<line x1="{ml}" y1="{mt + ph}" x2="{ml + pw}" y2="{mt + ph}" '
-        f'stroke="#333" stroke-width="1.2"/>',
-        f'<text x="{ml + pw / 2:.0f}" y="{h - 20}" text-anchor="middle" '
-        f'font-size="12" fill="#333">Target service level -&gt; (higher costs more)'
-        f'</text>',
-        f'<text x="18" y="{mt + ph / 2:.0f}" text-anchor="middle" font-size="12" '
-        f'fill="#333" transform="rotate(-90 18 {mt + ph / 2:.0f})">'
-        f'Safety-stock carrying cost ($/yr, modeled)</text>',
-        # axis end labels
-        f'<text x="{ml}" y="{mt + ph + 16}" text-anchor="start" font-size="10" '
-        f'fill="#666">{slmin:.0%}</text>',
-        f'<text x="{ml + pw}" y="{mt + ph + 16}" text-anchor="end" font-size="10" '
-        f'fill="#666">{slmax:.1%}</text>',
-        f'<text x="{ml - 6}" y="{mt + 8:.0f}" text-anchor="end" font-size="10" '
-        f'fill="#666">${cmax:,.0f}</text>',
-        f'<text x="{ml - 6}" y="{mt + ph:.0f}" text-anchor="end" font-size="10" '
-        f'fill="#666">$0</text>',
-    ]
+    parts = atlas.svg_open(w, h)
+    atlas.svg_header(parts, w, 7, "Inventory carrying cost vs service level "
+                     "(synthetic; illustrative cost factors)")
 
-    dec_poly = " ".join(f"{px(p.service_level):.1f},{py(c):.1f}" for p, c in zip(pts, dec_cost, strict=True))
-    net_poly = " ".join(f"{px(p.service_level):.1f},{py(c):.1f}" for p, c in zip(pts, net_cost, strict=True))
+    # Hairline money grid; x ticks sit at the actual swept service levels.
+    atlas.svg_grid_y(parts, atlas.nice_ticks(0.0, cmax, 6), py, ml, ml + pw,
+                     atlas.money)
+    atlas.svg_baseline(parts, ml, ml + pw, pb)
+
+    def fmt_sl(sl: float) -> str:
+        return f"{sl * 100:g}%"
+
+    atlas.svg_ticks_x(parts, [p.service_level for p in pts], px, pb, fmt_sl)
+
+    # Axis titles.
     parts.append(
-        f'<polyline points="{dec_poly}" fill="none" stroke="#c44e52" '
-        f'stroke-width="1.8" stroke-dasharray="5 3"/>'
+        f'<text x="{ml + pw / 2:.0f}" y="{pb + 36}" text-anchor="middle" '
+        f'font-size="10.5" fill="{atlas.INK2}">Target service level -&gt; '
+        f'(higher costs more)</text>'
     )
     parts.append(
-        f'<polyline points="{net_poly}" fill="none" stroke="#1f9d55" '
-        f'stroke-width="2.0"/>'
+        f'<text x="20" y="{mt + ph / 2:.0f}" text-anchor="middle" '
+        f'font-size="10.5" fill="{atlas.INK2}" '
+        f'transform="rotate(-90 20 {mt + ph / 2:.0f})">'
+        f'Safety-stock carrying cost ($/yr, modeled)</text>'
+    )
+
+    # Decentralized recedes to dashed gray; the pooled network wears blue.
+    dec_poly = " ".join(f"{px(p.service_level):.1f},{py(c):.1f}"
+                        for p, c in zip(pts, dec_cost, strict=True))
+    net_poly = " ".join(f"{px(p.service_level):.1f},{py(c):.1f}"
+                        for p, c in zip(pts, net_cost, strict=True))
+    parts.append(
+        f'<polyline points="{dec_poly}" fill="none" '
+        f'stroke="{atlas.SERIES_GRAY}" stroke-width="1.8" '
+        f'stroke-dasharray="5 3"/>'
+    )
+    parts.append(
+        f'<polyline points="{net_poly}" fill="none" stroke="{atlas.BLUE}" '
+        f'stroke-width="2.2"/>'
     )
     for p, c in zip(pts, dec_cost, strict=True):
         parts.append(
-            f'<circle cx="{px(p.service_level):.1f}" cy="{py(c):.1f}" r="3.2" '
-            f'fill="#c44e52"/>'
+            f'<circle cx="{px(p.service_level):.1f}" cy="{py(c):.1f}" r="3.6" '
+            f'fill="{atlas.SERIES_GRAY}" stroke="{atlas.PAPER}" '
+            f'stroke-width="1.6"/>'
         )
     for p, c in zip(pts, net_cost, strict=True):
         parts.append(
-            f'<circle cx="{px(p.service_level):.1f}" cy="{py(c):.1f}" r="4" '
-            f'fill="#1f9d55" stroke="#222" stroke-width="0.7"/>'
-        )
-        parts.append(
-            f'<text x="{px(p.service_level):.1f}" y="{py(c) - 8:.1f}" '
-            f'text-anchor="middle" font-size="9" fill="#222">{p.service_level:.0%}</text>'
+            f'<circle cx="{px(p.service_level):.1f}" cy="{py(c):.1f}" r="4.2" '
+            f'fill="{atlas.BLUE}" stroke="{atlas.PAPER}" stroke-width="1.8"/>'
         )
 
-    # legend
-    lx, ly = ml + 12, mt + 6
+    # legend (upper left, where both curves are still low)
+    lx, ly = ml + 14, mt + 16
     parts.append(
-        f'<line x1="{lx}" y1="{ly}" x2="{lx + 22}" y2="{ly}" stroke="#1f9d55" '
-        f'stroke-width="2.0"/>'
-        f'<text x="{lx + 28}" y="{ly + 4}" font-size="10" fill="#333">'
+        f'<line x1="{lx}" y1="{ly}" x2="{lx + 22}" y2="{ly}" '
+        f'stroke="{atlas.BLUE}" stroke-width="2.2"/>'
+        f'<text x="{lx + 28}" y="{ly + 4}" font-size="10" fill="{atlas.INK2}">'
         f'Network (pooled by opened DCs)</text>'
     )
     parts.append(
-        f'<line x1="{lx}" y1="{ly + 16}" x2="{lx + 22}" y2="{ly + 16}" '
-        f'stroke="#c44e52" stroke-width="1.8" stroke-dasharray="5 3"/>'
-        f'<text x="{lx + 28}" y="{ly + 20}" font-size="10" fill="#333">'
+        f'<line x1="{lx}" y1="{ly + 18}" x2="{lx + 22}" y2="{ly + 18}" '
+        f'stroke="{atlas.SERIES_GRAY}" stroke-width="1.8" '
+        f'stroke-dasharray="5 3"/>'
+        f'<text x="{lx + 28}" y="{ly + 22}" font-size="10" fill="{atlas.INK2}">'
         f'Decentralized (one stock point / zone)</text>'
     )
-    parts.append(
-        f'<text x="{ml}" y="{h - 6}" font-size="9" fill="#999">Curves rise convexly'
-        f': the last points of service cost the most. Synthetic data; cost factors '
-        f'illustrative.</text>'
-    )
-    parts.append("</svg>")
-    return "\n".join(parts) + "\n"
+
+    atlas.svg_footer(parts, w, h, [
+        "Curves rise convexly: the last points of service cost the most. "
+        "Synthetic data; cost factors illustrative."
+    ])
+    return atlas.svg_close(parts)

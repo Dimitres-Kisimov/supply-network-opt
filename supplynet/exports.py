@@ -1,8 +1,11 @@
 """Executive deliverables: a PDF report and an Excel workbook.
 
-The PDF (matplotlib PdfPages) has a cover with the synthetic-data disclaimer and
-headline savings, a network map of opened DCs and their flows, a cost-breakdown
-bar, and a safety-stock pooling chart. The Excel workbook (openpyxl) has
+The PDF (matplotlib PdfPages) is a "network atlas": eight numbered plates that
+share one chrome (see :mod:`supplynet.plates` / :mod:`supplynet.atlas`) -- a
+cover with the synthetic-data disclaimer and headline savings, a network map of
+opened DCs and their flows, a cost-breakdown bar, a safety-stock pooling chart,
+the CO2 Pareto sweep, the N-1 resilience screen, the service-level frontier and
+the demand-growth expansion staircase. The Excel workbook (openpyxl) has
 Summary, Facilities, Flows and SafetyStock sheets.
 """
 
@@ -16,9 +19,28 @@ matplotlib.use("Agg")
 matplotlib.rcParams["text.parse_math"] = False
 import matplotlib.pyplot as plt  # noqa: E402
 from matplotlib.backends.backend_pdf import PdfPages  # noqa: E402
+from matplotlib.lines import Line2D  # noqa: E402
 from openpyxl import Workbook  # noqa: E402
 from openpyxl.styles import Font  # noqa: E402
 
+from supplynet import plates  # noqa: E402
+from supplynet.atlas import (  # noqa: E402
+    AQUA,
+    BLUE,
+    BLUE_DARK,
+    BLUE_FLOW,
+    BLUE_SOFT,
+    CRITICAL,
+    GOOD_TEXT,
+    GRAY_FILL,
+    INK,
+    INK2,
+    MUTED,
+    ORANGE,
+    PAPER,
+    RULE,
+    SERIES_GRAY,
+)
 from supplynet.co2_sensitivity import to_csv, to_svg, tradeoff_readout  # noqa: E402
 from supplynet.growth import growth_readout  # noqa: E402
 from supplynet.growth import to_csv as growth_to_csv  # noqa: E402
@@ -39,15 +61,12 @@ DISCLAIMER = (
 
 
 def _cover_page(pdf: PdfPages, r: PipelineResult) -> None:
-    fig = plt.figure(figsize=(11, 8.5))
-    fig.subplots_adjust(left=0.08, right=0.92, top=0.92, bottom=0.08)
-    ax = fig.add_subplot(111)
-    ax.axis("off")
+    fig = plates.new_plate(1, title=None)
 
-    ax.text(0.5, 0.93, "Supply-Network Optimization", ha="center",
-            fontsize=26, fontweight="bold")
-    ax.text(0.5, 0.87, "Distribution-Center Siting, Network Flow & Safety Stock",
-            ha="center", fontsize=14, color="#444444")
+    fig.text(0.5, 0.855, "Supply-Network Optimization", ha="center",
+             fontsize=24, fontweight="bold", color=INK)
+    fig.text(0.5, 0.815, "Distribution-Center Siting, Network Flow & Safety Stock",
+             ha="center", fontsize=12.5, color=INK2)
 
     headline = (
         f"Optimized network opens {r.milp.n_opened} of {r.data.n_dcs} candidate DCs "
@@ -63,13 +82,14 @@ def _cover_page(pdf: PdfPages, r: PipelineResult) -> None:
         f"(network) / {r.pooling.reduction_pct:.0f}% (full centralization) "
         f"at a {r.service_level:.0%} service level."
     )
-    ax.text(0.5, 0.72, textwrap.fill(headline, 74), ha="center", fontsize=13)
-    ax.text(0.5, 0.65, textwrap.fill(saved, 74), ha="center", fontsize=13,
-            color="#0a6b0a")
-    ax.text(0.5, 0.57, textwrap.fill(pool, 74), ha="center", fontsize=13,
-            color="#0a4a8b")
+    fig.text(0.5, 0.745, textwrap.fill(headline, 90), ha="center", fontsize=12,
+             color=INK)
+    fig.text(0.5, 0.705, textwrap.fill(saved, 90), ha="center", fontsize=12,
+             color=GOOD_TEXT)
+    fig.text(0.5, 0.665, textwrap.fill(pool, 90), ha="center", va="top",
+             fontsize=12, color=INK2)
 
-    # Headline metric tiles.
+    # Headline metric tiles: white cards behind a hairline ring.
     tiles = [
         (f"{r.milp.n_opened}", "DCs opened"),
         (f"{r.savings_pct:.1f}%", "cost vs baseline"),
@@ -77,30 +97,47 @@ def _cover_page(pdf: PdfPages, r: PipelineResult) -> None:
         (f"{r.pooling.network_reduction_pct:.0f}%", "safety-stock pooling"),
     ]
     for k, (val, lab) in enumerate(tiles):
-        x0 = 0.06 + k * 0.235
-        ax.add_patch(plt.Rectangle((x0, 0.30), 0.20, 0.16, transform=ax.transAxes,
-                                   facecolor="#eef3f8", edgecolor="#9bb4cc"))
-        ax.text(x0 + 0.10, 0.40, val, ha="center", fontsize=17, fontweight="bold",
-                transform=ax.transAxes)
-        ax.text(x0 + 0.10, 0.34, lab, ha="center", fontsize=9, color="#333333",
-                transform=ax.transAxes)
+        x0 = 0.075 + k * 0.2225
+        fig.add_artist(plt.Rectangle((x0, 0.42), 0.20, 0.145,
+                                     transform=fig.transFigure, facecolor=PAPER,
+                                     edgecolor=RULE, linewidth=0.9))
+        fig.text(x0 + 0.10, 0.505, val, ha="center", fontsize=19,
+                 fontweight="bold", color=INK)
+        fig.text(x0 + 0.10, 0.45, lab, ha="center", fontsize=8.5, color=MUTED)
 
-    ax.text(0.5, 0.14, textwrap.fill(DISCLAIMER, 92), ha="center", va="center",
-            fontsize=9, color="#777777",
-            bbox=dict(boxstyle="round", facecolor="#fbfbf2", edgecolor="#ddddcc"))
-    ax.text(0.5, 0.03, "Synthetic data - seed "
-            f"{r.data.seed} - generated for portfolio demonstration",
-            ha="center", fontsize=8, color="#999999")
+    # Plate index: the atlas contents, one line per row of plates.
+    fig.text(0.5, 0.345, "PLATE 02 NETWORK MAP  -  03 COST BREAKDOWN  -  "
+             "04 RISK POOLING  -  05 COST VS CO2",
+             ha="center", fontsize=8, color=MUTED)
+    fig.text(0.5, 0.315, "PLATE 06 N-1 RESILIENCE  -  07 SERVICE FRONTIER  -  "
+             "08 GROWTH STAIRCASE",
+             ha="center", fontsize=8, color=MUTED)
+
+    fig.text(0.5, 0.19, textwrap.fill(DISCLAIMER, 92), ha="center", va="center",
+             fontsize=9, color=INK2,
+             bbox=dict(boxstyle="round,pad=0.6", facecolor="#f9f9f7",
+                       edgecolor=RULE, linewidth=0.8))
+    fig.add_artist(Line2D([plates.MARGIN_L, plates.MARGIN_R], [0.09, 0.09],
+                          transform=fig.transFigure, color=RULE, linewidth=0.8))
+    fig.text(0.5, 0.055, "Synthetic data - seed "
+             f"{r.data.seed} - generated for portfolio demonstration",
+             ha="center", fontsize=8, color=MUTED)
     pdf.savefig(fig)
     plt.close(fig)
 
 
 def _network_map(pdf: PdfPages, r: PipelineResult) -> None:
-    fig, ax = plt.subplots(figsize=(11, 8.5))
+    fig = plates.new_plate(2, "Optimized Network: opened DCs and outbound flows")
+    ax = fig.add_axes([0.07, 0.16, 0.60, 0.68])
+    plates.despine(ax)
     d = r.data
     opened = set(r.milp.opened)
     assign = r.milp.assignment
     dc_ids = list(d.dcs["dc_id"])
+
+    def dc_size(cap: float) -> float:
+        # Node size by capacity (4k-9k units -> 60-300 pt^2).
+        return 60.0 + 240.0 * (cap - 4000.0) / 5000.0
 
     # Flows: opened DC -> customer, line width by shipped volume.
     max_flow = assign.max() if assign.size else 1.0
@@ -114,116 +151,206 @@ def _network_map(pdf: PdfPages, r: PipelineResult) -> None:
             ax.plot(
                 [d.dcs.iloc[i]["x"], d.customers.iloc[j]["x"]],
                 [d.dcs.iloc[i]["y"], d.customers.iloc[j]["y"]],
-                color="#b0c4de", linewidth=0.4 + 2.5 * f / max_flow, zorder=1,
+                color=BLUE_FLOW, linewidth=0.5 + 2.8 * f / max_flow, zorder=1,
+                solid_capstyle="round",
             )
 
-    ax.scatter(d.customers["x"], d.customers["y"], s=25, c="#555555",
-               marker="o", label="Customer zone", zorder=2)
+    cust_sizes = 10.0 + 30.0 * (d.customers["demand_mean"] - 200.0) / 800.0
+    ax.scatter(d.customers["x"], d.customers["y"], s=cust_sizes, c=SERIES_GRAY,
+               marker="o", linewidths=0.6, edgecolors=PAPER, zorder=2)
 
     closed = d.dcs[~d.dcs["dc_id"].isin(opened)]
     open_dcs = d.dcs[d.dcs["dc_id"].isin(opened)]
-    ax.scatter(closed["x"], closed["y"], s=90, facecolors="none",
-               edgecolors="#aa3333", marker="s", label="DC (not opened)", zorder=3)
-    ax.scatter(open_dcs["x"], open_dcs["y"], s=140, c="#1f9d55",
-               marker="s", label="DC (opened)", zorder=4)
-    ax.scatter(d.plants["x"], d.plants["y"], s=180, c="#8b5a00",
-               marker="^", label="Plant", zorder=5)
+    ax.scatter(closed["x"], closed["y"], s=dc_size(closed["capacity"]),
+               facecolors="none", edgecolors=RULE, linewidths=1.2, marker="s",
+               zorder=3)
+    ax.scatter(open_dcs["x"], open_dcs["y"], s=dc_size(open_dcs["capacity"]),
+               c=BLUE, marker="s", linewidths=1.4, edgecolors=PAPER, zorder=4)
+    ax.scatter(d.plants["x"], d.plants["y"], s=190, c=ORANGE, marker="^",
+               linewidths=1.4, edgecolors=PAPER, zorder=5)
 
+    # Direct labels: every facility is named on the map.
     for _, row in open_dcs.iterrows():
         ax.annotate(row["dc_id"], (row["x"], row["y"]), fontsize=9,
-                    fontweight="bold", xytext=(4, 4), textcoords="offset points")
+                    fontweight="bold", color=INK,
+                    xytext=(9, 8), textcoords="offset points")
+    for _, row in closed.iterrows():
+        ax.annotate(row["dc_id"], (row["x"], row["y"]), fontsize=7.5,
+                    color=MUTED, xytext=(7, 6), textcoords="offset points")
+    for _, row in d.plants.iterrows():
+        ax.annotate(row["plant_id"], (row["x"], row["y"]), fontsize=8,
+                    color=INK2, xytext=(6, -10), textcoords="offset points")
 
-    ax.set_title("Optimized Network: opened DCs and outbound flows", fontsize=14)
+    ax.set_aspect("equal")
+    ax.set_xlim(-4, 104)
+    ax.set_ylim(-4, 104)
     ax.set_xlabel("x (km)")
     ax.set_ylabel("y (km)")
-    ax.legend(loc="upper right", fontsize=9, framealpha=0.9)
-    ax.grid(True, linestyle=":", alpha=0.4)
+    ax.grid(True)
+    ax.set_axisbelow(True)
+
+    # Legend column to the right of the map, with fixed-size key marks.
+    handles = [
+        Line2D([], [], marker="o", linestyle="none", markersize=5,
+               markerfacecolor=SERIES_GRAY, markeredgecolor=PAPER,
+               label="Customer zone"),
+        Line2D([], [], marker="s", linestyle="none", markersize=8,
+               markerfacecolor="none", markeredgecolor=RULE,
+               label="DC (not opened)"),
+        Line2D([], [], marker="s", linestyle="none", markersize=9,
+               markerfacecolor=BLUE, markeredgecolor=PAPER, label="DC (opened)"),
+        Line2D([], [], marker="^", linestyle="none", markersize=9,
+               markerfacecolor=ORANGE, markeredgecolor=PAPER, label="Plant"),
+        Line2D([], [], color=BLUE_FLOW, linewidth=2.0, label="Outbound flow"),
+    ]
+    ax.legend(handles=handles, loc="upper left", bbox_to_anchor=(1.06, 1.0),
+              borderaxespad=0.0)
+    fig.text(0.705, 0.55, "Square size = DC capacity\n"
+             "Dot size = zone demand\nLine width = shipped units",
+             fontsize=8, color=MUTED, va="top", linespacing=1.7)
+
+    plates.footer(fig, "Marker size scales with DC capacity (squares) and zone "
+                  "demand (dots); flow-line width with shipped units. Synthetic, "
+                  "seeded coordinates on a 100 km grid; model-based estimates.")
     pdf.savefig(fig)
     plt.close(fig)
 
 
 def _cost_breakdown(pdf: PdfPages, r: PipelineResult) -> None:
-    fig, ax = plt.subplots(figsize=(11, 8.5))
+    fig = plates.new_plate(
+        3, "Cost breakdown",
+        f"MILP saves ${r.savings_abs:,.0f} ({r.savings_pct:.1f}%) "
+        "vs greedy baseline",
+    )
+    ax = fig.add_axes([0.26, 0.17, 0.40, 0.60])
+    plates.despine(ax)
     labels = ["Greedy baseline", "MILP optimized"]
     fixed = [r.greedy.fixed_cost, r.milp.fixed_cost]
     transport = [r.greedy.transport_cost, r.milp.transport_cost]
 
-    ax.bar(labels, fixed, label="Fixed opening cost", color="#4c72b0")
-    ax.bar(labels, transport, bottom=fixed, label="Transport cost", color="#dd8452")
+    # Emphasis is ink-vs-gray: the optimized bar wears the blues, the baseline
+    # wears grays. Stack order is identical (fixed below, transport above) and
+    # a surface gap separates the segments.
+    ax.bar(labels, fixed, width=0.32, color=[SERIES_GRAY, BLUE_DARK],
+           edgecolor=PAPER, linewidth=1.5, label="Fixed opening cost")
+    ax.bar(labels, transport, bottom=fixed, width=0.32,
+           color=[GRAY_FILL, BLUE_SOFT], edgecolor=PAPER, linewidth=1.5,
+           label="Transport cost")
 
     for k in range(2):
         total = fixed[k] + transport[k]
         ax.text(k, total, f"${total:,.0f}", ha="center", va="bottom",
-                fontsize=11, fontweight="bold")
+                fontsize=11, fontweight="bold", color=INK)
 
     ax.set_ylabel("Cost ($)")
-    ax.set_title(
-        f"Cost breakdown: MILP saves ${r.savings_abs:,.0f} "
-        f"({r.savings_pct:.1f}%) vs greedy baseline",
-        fontsize=13,
-    )
-    ax.legend()
-    ax.grid(True, axis="y", linestyle=":", alpha=0.4)
+    ax.set_ylim(0, max(f + t for f, t in zip(fixed, transport, strict=True)) * 1.18)
+    plates.money_axis(ax)
+    ax.grid(True, axis="y")
+    ax.set_axisbelow(True)
+
+    # Legend swatches show the MILP blues; the caption explains the gray bar.
+    handles = [
+        plt.Rectangle((0, 0), 1, 1, facecolor=BLUE_DARK, edgecolor=PAPER,
+                      label="Fixed opening cost"),
+        plt.Rectangle((0, 0), 1, 1, facecolor=BLUE_SOFT, edgecolor=PAPER,
+                      label="Transport cost"),
+    ]
+    ax.legend(handles=handles, loc="upper left", bbox_to_anchor=(1.08, 1.0),
+              borderaxespad=0.0)
+
+    plates.footer(fig, "The baseline bar is de-emphasized in gray; its stack "
+                  "order matches the legend (fixed opening cost below, transport "
+                  "above). Synthetic, seeded data; model-based estimates.")
     pdf.savefig(fig)
     plt.close(fig)
 
 
 def _pooling_chart(pdf: PdfPages, r: PipelineResult) -> None:
-    fig, ax = plt.subplots(figsize=(11, 8.5))
     p = r.pooling
+    fig = plates.new_plate(
+        4, f"Risk pooling at {p.service_level:.0%} service (z={p.z:.2f})",
+        f"-{p.network_reduction_pct:.0f}% network, "
+        f"-{p.reduction_pct:.0f}% full centralization",
+    )
+    ax = fig.add_axes([0.13, 0.17, 0.74, 0.58])
+    plates.despine(ax)
     labels = [
         "Decentralized\n(1 stock point / zone)",
         f"Network\n({r.milp.n_opened} opened DCs)",
         "Fully centralized\n(single DC)",
     ]
     values = [p.decentralized, p.network, p.centralized]
-    colors = ["#c44e52", "#dd8452", "#55a868"]
-    bars = ax.bar(labels, values, color=colors)
+    # Entity colors held constant across the atlas: decentralized gray,
+    # the opened-DC network blue, full centralization aqua.
+    colors = [SERIES_GRAY, BLUE, AQUA]
+    bars = ax.bar(labels, values, width=0.5, color=colors)
     for bar, v in zip(bars, values, strict=True):
         ax.text(bar.get_x() + bar.get_width() / 2, v, f"{v:,.0f}",
-                ha="center", va="bottom", fontsize=11, fontweight="bold")
+                ha="center", va="bottom", fontsize=11, fontweight="bold",
+                color=INK)
 
     ax.set_ylabel("Total safety stock (units)")
-    ax.set_title(
-        f"Risk pooling at {p.service_level:.0%} service (z={p.z:.2f}): "
-        f"-{p.network_reduction_pct:.0f}% network, "
-        f"-{p.reduction_pct:.0f}% full centralization",
-        fontsize=13,
-    )
-    ax.grid(True, axis="y", linestyle=":", alpha=0.4)
+    ax.set_ylim(0, max(values) * 1.15)
+    plates.comma_axis(ax)
+    ax.grid(True, axis="y")
+    ax.set_axisbelow(True)
+    ax.tick_params(axis="x", labelcolor=INK2, labelsize=9)
+
+    plates.footer(fig, "Safety stock is modeled (normal, independent demand; "
+                  "fixed lead times), so the pooling gain is an optimistic "
+                  "bound. Synthetic, seeded data.")
     pdf.savefig(fig)
     plt.close(fig)
 
 
 def _co2_pareto(pdf: PdfPages, r: PipelineResult) -> None:
-    fig, ax = plt.subplots(figsize=(11, 8.5))
     s = r.co2
+    fig = plates.new_plate(5, "Cost vs CO2 by network density",
+                           "(illustrative emission factor)")
+    ax = fig.add_axes([0.09, 0.18, 0.83, 0.60])
+    plates.despine(ax)
 
     # Pareto frontier connector (sorted by cost).
     front = sorted(s.pareto, key=lambda d: d.cost)
     if len(front) >= 2:
         ax.plot([d.cost for d in front], [d.co2_t for d in front],
-                color="#1f9d55", linestyle="--", linewidth=1.5, zorder=1,
+                color=BLUE, linewidth=1.4, alpha=0.65, zorder=1,
                 label="Pareto frontier")
 
+    # Pareto designs wear blue; dominated designs recede to gray.
     for d in s.designs:
-        color = "#1f9d55" if d.is_pareto else "#c44e52"
-        ax.scatter(d.cost, d.co2_t, s=140 if d is s.cost_optimal else 90,
-                   c=color, edgecolors="#222222", zorder=3)
+        color = BLUE if d.is_pareto else SERIES_GRAY
+        is_opt = d is s.cost_optimal
+        ax.scatter(d.cost, d.co2_t, s=150 if is_opt else 100, c=color,
+                   edgecolors=INK if is_opt else PAPER,
+                   linewidths=1.2 if is_opt else 1.5, zorder=3)
         ax.annotate(f"{d.n_dc} DCs", (d.cost, d.co2_t), fontsize=9,
-                    xytext=(6, 6), textcoords="offset points")
+                    color=INK2, xytext=(7, 7), textcoords="offset points")
 
     opt = s.cost_optimal
     ax.annotate("cost-optimal", (opt.cost, opt.co2_t), fontsize=9,
-                color="#0a4a8b", xytext=(6, -14), textcoords="offset points")
+                color=INK2, xytext=(7, -15), textcoords="offset points")
 
     ax.set_xlabel("Total cost ($) - lower is better")
     ax.set_ylabel("Modeled outbound CO2 (tonnes) - lower is better")
-    ax.set_title(
-        "Cost vs CO2 by network density (illustrative emission factor)",
-        fontsize=13,
-    )
-    ax.grid(True, linestyle=":", alpha=0.4)
+    plates.money_axis(ax, axis="x")
+    ax.grid(True)
+    ax.set_axisbelow(True)
+    ax.margins(x=0.07, y=0.08)
+
+    handles = [
+        Line2D([], [], marker="o", linestyle="none", markersize=8,
+               markerfacecolor=BLUE, markeredgecolor=PAPER,
+               label="Pareto-optimal"),
+    ]
+    if any(not d.is_pareto for d in s.designs):
+        handles.append(Line2D([], [], marker="o", linestyle="none", markersize=7,
+                              markerfacecolor=SERIES_GRAY, markeredgecolor=PAPER,
+                              label="dominated"))
+    if len(front) >= 2:
+        handles.insert(0, Line2D([], [], color=BLUE, linewidth=1.4, alpha=0.65,
+                                 label="Pareto frontier"))
+    ax.legend(handles=handles, loc="upper right")
 
     note = "  ".join([
         "Point label = number of open DCs.",
@@ -231,164 +358,193 @@ def _co2_pareto(pdf: PdfPages, r: PipelineResult) -> None:
         f"({s.unit_weight_t:.2f} t/unit) is ILLUSTRATIVE, not certified.",
     ])
     read = tradeoff_readout(s)
-    caption = textwrap.fill(read[1], 96) if len(read) > 1 else ""
-    ax.text(0.5, -0.13, note, transform=ax.transAxes, ha="center",
-            fontsize=8, color="#777777")
-    if caption:
-        ax.text(0.5, -0.18, textwrap.fill(caption, 96), transform=ax.transAxes,
-                ha="center", fontsize=9, color="#333333")
-    fig.subplots_adjust(bottom=0.22)
-    if front:
-        ax.legend(loc="upper right", fontsize=9)
+    caption = [note] + ([read[1]] if len(read) > 1 else [])
+    plates.footer(fig, caption)
     pdf.savefig(fig)
     plt.close(fig)
 
 
 def _resilience_chart(pdf: PdfPages, r: PipelineResult) -> None:
-    fig, (ax_fill, ax_prem) = plt.subplots(1, 2, figsize=(11, 8.5))
     res = r.resilience
+    verdict = ("N-1 resilient" if res.n_1_resilient
+               else f"{res.n_critical} of {len(res.scenarios)} opened DCs are critical")
+    fig = plates.new_plate(6, "Disruption resilience: single-DC-outage screen",
+                           f"({verdict})")
+    ax_fill = fig.add_axes([0.07, 0.20, 0.39, 0.54])
+    ax_prem = fig.add_axes([0.56, 0.20, 0.37, 0.54])
+    plates.despine(ax_fill)
+    plates.despine(ax_prem)
     labels = [f"lose {s.failed_dc}" for s in res.scenarios]
     fills = [s.fill_rate_pct for s in res.scenarios]
     premiums = [s.recovery_premium for s in res.scenarios]
 
-    # Left: surviving fill rate per single-DC outage (100% = fully resilient).
-    colors = ["#55a868" if s.resilient else "#c44e52" for s in res.scenarios]
-    bars = ax_fill.bar(labels, fills, color=colors)
+    # Left: each outage as served-vs-unmet demand, stacked to the 100% mark.
+    # Status red is reserved for the genuinely bad part: the unmet slice.
+    unmet = [100.0 - v for v in fills]
+    bars = ax_fill.bar(labels, fills, width=0.5, color=BLUE, edgecolor=PAPER,
+                       linewidth=1.5, label="served")
+    ax_fill.bar(labels, unmet, bottom=fills, width=0.5, color=CRITICAL,
+                edgecolor=PAPER, linewidth=1.5, label="unmet")
     for bar, v in zip(bars, fills, strict=True):
-        ax_fill.text(bar.get_x() + bar.get_width() / 2, v, f"{v:.1f}%",
-                     ha="center", va="bottom", fontsize=10, fontweight="bold")
-    ax_fill.axhline(100.0, color="#333333", linestyle="--", linewidth=1.0)
-    ax_fill.set_ylim(0, 112)
+        ax_fill.text(bar.get_x() + bar.get_width() / 2, v - 2.5, f"{v:.1f}%",
+                     ha="center", va="top", fontsize=10, fontweight="bold",
+                     color=PAPER)
+    ax_fill.set_ylim(0, 100)
     ax_fill.set_ylabel("Demand served within surviving fleet (%)")
-    ax_fill.set_title("N-1 outage: fill rate if one DC is lost", fontsize=12)
-    ax_fill.grid(True, axis="y", linestyle=":", alpha=0.4)
+    ax_fill.set_title("N-1 outage: fill rate if one DC is lost", pad=10)
+    ax_fill.grid(True, axis="y")
+    ax_fill.set_axisbelow(True)
+    ax_fill.legend(loc="upper center", bbox_to_anchor=(0.5, -0.10), ncols=2)
 
     # Right: cheapest recovery premium to restore 100% service.
-    pbars = ax_prem.bar(labels, premiums, color="#4c72b0")
+    pbars = ax_prem.bar(labels, premiums, width=0.5, color=BLUE)
     for bar, s in zip(pbars, res.scenarios, strict=True):
         tag = ("+" + ", ".join(s.recovery_activated)) if s.recovery_activated else "no add"
         ax_prem.text(bar.get_x() + bar.get_width() / 2, s.recovery_premium,
-                     f"${s.recovery_premium:,.0f}\n{tag}", ha="center", va="bottom",
-                     fontsize=9)
+                     f"${s.recovery_premium:,.0f}\n{tag}", ha="center",
+                     va="bottom", fontsize=9, color=INK)
     ax_prem.set_ylabel("Recovery premium ($ added fixed + transport)")
-    ax_prem.set_title("Cheapest standby activation to restore 100%", fontsize=12)
-    ax_prem.grid(True, axis="y", linestyle=":", alpha=0.4)
-    ax_prem.margins(y=0.18)
+    ax_prem.set_title("Cheapest standby activation to restore 100%", pad=10)
+    plates.money_axis(ax_prem)
+    ax_prem.grid(True, axis="y")
+    ax_prem.set_axisbelow(True)
+    ax_prem.margins(y=0.22)
 
-    verdict = ("N-1 resilient" if res.n_1_resilient
-               else f"{res.n_critical} of {len(res.scenarios)} opened DCs are critical")
-    fig.suptitle(f"Disruption resilience: single-DC-outage screen ({verdict})",
-                 fontsize=14, y=0.98)
-    caption = textwrap.fill(resilience_readout(res)[1], 110)
-    fig.text(0.5, 0.02, caption, ha="center", fontsize=9, color="#333333")
-    fig.subplots_adjust(bottom=0.14, top=0.90, wspace=0.28)
+    plates.footer(fig, resilience_readout(res)[1])
     pdf.savefig(fig)
     plt.close(fig)
 
 
 def _service_frontier_chart(pdf: PdfPages, r: PipelineResult) -> None:
-    fig, (ax_ss, ax_marg) = plt.subplots(1, 2, figsize=(11, 8.5))
     sf = r.service_frontier
+    fig = plates.new_plate(7, "Inventory service-level frontier",
+                           "(illustrative inventory-cost factors)")
+    ax_ss = fig.add_axes([0.07, 0.18, 0.39, 0.56])
+    ax_marg = fig.add_axes([0.57, 0.18, 0.36, 0.56])
+    plates.despine(ax_ss)
+    plates.despine(ax_marg)
     svc = [p.service_level * 100.0 for p in sf.points]
 
     # Left: safety stock vs service level under the three pooling regimes.
+    # The regimes keep their atlas colors; the network line carries the weight.
     ax_ss.plot(svc, [p.ss_decentralized for p in sf.points], marker="o",
-               color="#c44e52", label="Decentralized (1 point / zone)")
-    ax_ss.plot(svc, [p.ss_network for p in sf.points], marker="s",
-               color="#1f9d55", label=f"Network ({r.milp.n_opened} opened DCs)")
-    ax_ss.plot(svc, [p.ss_centralized for p in sf.points], marker="^",
-               color="#4c72b0", label="Fully centralized")
+               markersize=4.5, markeredgecolor=PAPER, markeredgewidth=1.0,
+               color=SERIES_GRAY, linewidth=1.8, linestyle=(0, (4, 2)),
+               label="Decentralized (1 point / zone)")
+    ax_ss.plot(svc, [p.ss_centralized for p in sf.points], marker="o",
+               markersize=4.5, markeredgecolor=PAPER, markeredgewidth=1.0,
+               color=AQUA, linewidth=1.8, label="Fully centralized")
+    ax_ss.plot(svc, [p.ss_network for p in sf.points], marker="o",
+               markersize=5.5, markeredgecolor=PAPER, markeredgewidth=1.2,
+               color=BLUE, linewidth=2.4,
+               label=f"Network ({r.milp.n_opened} opened DCs)")
     ax_ss.set_xlabel("Target service level (%)")
     ax_ss.set_ylabel("Safety stock (units)")
-    ax_ss.set_title("Safety stock rises convexly with the service target", fontsize=12)
-    ax_ss.legend(fontsize=8)
-    ax_ss.grid(True, linestyle=":", alpha=0.4)
+    plates.comma_axis(ax_ss)
+    ax_ss.set_title("Safety stock rises convexly with the service target",
+                    pad=10)
+    ax_ss.legend(loc="upper left")
+    ax_ss.grid(True)
+    ax_ss.set_axisbelow(True)
 
     # Right: marginal carrying cost of each extra service point (network regime).
     marg_pts = [p for p in sf.points if p.marginal_cost_per_point > 0]
     labels = [f"{p.service_level:.1%}" for p in marg_pts]
     marginals = [p.marginal_cost_per_point for p in marg_pts]
-    bars = ax_marg.bar(labels, marginals, color="#dd8452")
+    bars = ax_marg.bar(labels, marginals, width=0.55, color=BLUE)
     for bar, v in zip(bars, marginals, strict=True):
         ax_marg.text(bar.get_x() + bar.get_width() / 2, v, f"${v:,.0f}",
-                     ha="center", va="bottom", fontsize=9)
+                     ha="center", va="bottom", fontsize=9, color=INK)
     ax_marg.set_xlabel("Service level reached")
     ax_marg.set_ylabel("Marginal carrying cost ($/yr per service point)")
-    ax_marg.set_title("The last points of service cost the most", fontsize=12)
-    ax_marg.grid(True, axis="y", linestyle=":", alpha=0.4)
+    ax_marg.set_title("The last points of service cost the most", pad=10)
+    plates.money_axis(ax_marg)
+    ax_marg.grid(True, axis="y")
+    ax_marg.set_axisbelow(True)
     ax_marg.margins(y=0.18)
 
-    fig.suptitle(
-        "Inventory service-level frontier (illustrative inventory-cost factors)",
-        fontsize=14, y=0.98,
-    )
-    caption = textwrap.fill(frontier_readout(sf)[2], 110)
-    fig.text(0.5, 0.02, caption, ha="center", fontsize=9, color="#333333")
-    fig.subplots_adjust(bottom=0.16, top=0.90, wspace=0.28)
+    plates.footer(fig, frontier_readout(sf)[2])
     pdf.savefig(fig)
     plt.close(fig)
 
 
 def _growth_chart(pdf: PdfPages, r: PipelineResult) -> None:
-    fig, (ax_cost, ax_stair) = plt.subplots(1, 2, figsize=(11, 8.5))
     g = r.growth
+    fig = plates.new_plate(
+        8, "Demand-growth capacity plan: expansion triggers and headroom",
+        "(uniform growth, synthetic data)",
+    )
+    # The staircase is the hero panel, on top; the cost sweep sits beneath it
+    # on the same growth axis. Two stacked panels -- never a dual axis.
+    ax_stair = fig.add_axes([0.09, 0.52, 0.84, 0.28])
+    ax_cost = fig.add_axes([0.09, 0.16, 0.84, 0.26], sharex=ax_stair)
+    plates.despine(ax_stair)
+    plates.despine(ax_cost)
     growths = [p.growth for p in g.points]
 
-    # Left: re-optimized vs frozen committed cost across the growth sweep.
-    ax_cost.plot(growths, [p.cost for p in g.points], marker="o", markersize=4,
-                 color="#1f9d55", label="Re-optimized at each level", zorder=3)
-    committed = [p for p in g.points if p.committed_feasible]
-    if committed:
-        ax_cost.plot([p.growth for p in committed],
-                     [p.committed_cost for p in committed], marker="s",
-                     markersize=4, color="#c44e52", linestyle="--",
-                     label="Committed network frozen", zorder=2)
-    ax_cost.axvline(g.committed_wall_growth, color="#c44e52", linestyle=":",
-                    linewidth=1.2)
-    ax_cost.annotate(
-        f"committed wall {g.committed_wall_growth:.3f}x\n"
-        f"({g.committed_headroom_pct:+.1f}% headroom)",
-        (g.committed_wall_growth, ax_cost.get_ylim()[0]), fontsize=8,
-        color="#c44e52", xytext=(6, 18), textcoords="offset points",
-    )
-    for p in g.expansion_triggers:
-        ax_cost.annotate(f"{p.n_opened} DCs", (p.growth, p.cost), fontsize=8,
-                         xytext=(4, -12), textcoords="offset points")
-    ax_cost.set_xlabel("Demand growth (x today)")
-    ax_cost.set_ylabel("Total network cost ($, fixed + outbound transport)")
-    ax_cost.set_title("Cost of growth: redesign vs frozen network", fontsize=12)
-    ax_cost.legend(fontsize=8, loc="upper left")
-    ax_cost.grid(True, linestyle=":", alpha=0.4)
-
-    # Right: the expansion staircase -- optimal open-DC count vs demand growth.
+    # Top: the expansion staircase -- optimal open-DC count vs demand growth.
     ax_stair.step(growths, [p.n_opened for p in g.points], where="post",
-                  color="#4c72b0", linewidth=2.0)
+                  color=BLUE, linewidth=2.6, zorder=3)
     for p in g.expansion_triggers:
+        ax_stair.scatter([p.growth], [p.n_opened], s=42, c=BLUE,
+                         edgecolors=PAPER, linewidths=1.4, zorder=4)
         ax_stair.annotate(f"DC #{p.n_opened} pays\nat {p.growth:.2f}x",
-                          (p.growth, p.n_opened), fontsize=8,
-                          xytext=(4, -22), textcoords="offset points")
-    ax_stair.set_xlabel("Demand growth (x today)")
+                          (p.growth, p.n_opened), fontsize=8, color=INK2,
+                          xytext=(6, -24), textcoords="offset points")
     ax_stair.set_ylabel("Optimal number of open DCs")
     ax_stair.set_yticks(sorted({p.n_opened for p in g.points}))
     ax_stair.set_title("The expansion staircase (MILP re-solved per level)",
-                       fontsize=12)
-    ax_stair.grid(True, linestyle=":", alpha=0.4)
-    ax_stair.margins(y=0.2)
+                       pad=10)
+    ax_stair.grid(True)
+    ax_stair.set_axisbelow(True)
+    ax_stair.margins(y=0.25)
+    ax_stair.tick_params(labelbottom=False)
 
-    fig.suptitle(
-        "Demand-growth capacity plan: expansion triggers and headroom "
-        "(uniform growth, synthetic data)",
-        fontsize=14, y=0.98,
+    # Bottom: re-optimized vs frozen committed cost across the growth sweep.
+    ax_cost.plot(growths, [p.cost for p in g.points], marker="o", markersize=4.5,
+                 markeredgecolor=PAPER, markeredgewidth=1.0, color=BLUE,
+                 linewidth=2.2, label="Re-optimized at each level", zorder=3)
+    committed = [p for p in g.points if p.committed_feasible]
+    if committed:
+        # Up to the wall the frozen cost coincides with the re-optimized cost,
+        # so the frozen series rides ON the blue line: hollow gray rings on
+        # top keep it visible exactly where the two series overlap.
+        ax_cost.plot([p.growth for p in committed],
+                     [p.committed_cost for p in committed], marker="o",
+                     markersize=7.5, markerfacecolor="none",
+                     markeredgecolor=SERIES_GRAY, markeredgewidth=1.6,
+                     color=SERIES_GRAY, linewidth=1.8, linestyle=(0, (4, 2)),
+                     label="Committed network frozen", zorder=4)
+    ax_cost.set_xlabel("Demand growth (x today)")
+    ax_cost.set_ylabel("Total network cost ($, fixed + outbound transport)",
+                       fontsize=8)
+    ax_cost.set_title("Cost of growth: redesign vs frozen network", pad=10)
+    plates.money_axis(ax_cost)
+    ax_cost.legend(loc="lower right")
+    ax_cost.grid(True)
+    ax_cost.set_axisbelow(True)
+
+    # The committed capacity wall, marked on both panels; labeled once, on the
+    # hero panel. Status red: past this line the frozen network is infeasible.
+    for ax in (ax_stair, ax_cost):
+        ax.axvline(g.committed_wall_growth, color=CRITICAL,
+                   linestyle=(0, (4, 2)), linewidth=1.2, zorder=2)
+    ax_stair.annotate(
+        f"committed wall {g.committed_wall_growth:.3f}x\n"
+        f"({g.committed_headroom_pct:+.1f}% headroom)",
+        (g.committed_wall_growth, ax_stair.get_ylim()[1]), fontsize=8,
+        color=CRITICAL, ha="left", va="top",
+        xytext=(6, -2), textcoords="offset points",
     )
-    caption = textwrap.fill(growth_readout(g)[0], 110)
-    fig.text(0.5, 0.02, caption, ha="center", fontsize=9, color="#333333")
-    fig.subplots_adjust(bottom=0.14, top=0.90, wspace=0.28)
+
+    plates.footer(fig, growth_readout(g)[0])
     pdf.savefig(fig)
     plt.close(fig)
 
 
 def build_pdf(r: PipelineResult, path: str) -> str:
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    plates.apply_style()
     with PdfPages(path) as pdf:
         _cover_page(pdf, r)
         _network_map(pdf, r)

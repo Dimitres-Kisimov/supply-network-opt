@@ -39,3 +39,34 @@ def test_deliverables_written_non_empty(tmp_path):
     assert growth_svg.stat().st_size > 0
     assert set(paths) == {"pdf", "xlsx", "csv", "svg", "sf_csv", "sf_svg",
                           "growth_csv", "growth_svg"}
+
+    # The SVG exports are numbered plates of the same "network atlas" as the
+    # PDF pages: shared masthead kicker and a per-artifact plate stamp.
+    for path, stamp in ((svg, "PLATE 05"), (sf_svg, "PLATE 07"),
+                        (growth_svg, "PLATE 08")):
+        text = path.read_text(encoding="utf-8")
+        assert "SUPPLY-NETWORK ATLAS" in text
+        assert stamp in text
+
+
+def test_atlas_plate_roster_is_consistent():
+    """One numbering across media: 8 plates, stamps render, palette is set."""
+    from supplynet import atlas
+
+    assert atlas.N_PLATES == 8
+    assert atlas.plate_label(5) == "PLATE 05 - COST VS CO2"
+    assert atlas.plate_label(8) == "PLATE 08 - GROWTH STAIRCASE"
+    # The series hues are the validated categorical slots (light surface).
+    assert atlas.BLUE == "#2a78d6"
+    assert atlas.ORANGE == "#eb6834"
+    assert atlas.AQUA == "#1baf7a"
+
+
+def test_nice_ticks_are_deterministic_and_cover_range():
+    from supplynet.atlas import nice_ticks
+
+    ticks = nice_ticks(0.0, 686_000.0, 5)
+    assert ticks == nice_ticks(0.0, 686_000.0, 5)  # pure function
+    assert ticks[0] >= 0.0 and ticks[-1] <= 686_000.0
+    assert all(b > a for a, b in zip(ticks, ticks[1:], strict=False))
+    assert nice_ticks(5.0, 5.0) == [5.0]  # degenerate range collapses safely

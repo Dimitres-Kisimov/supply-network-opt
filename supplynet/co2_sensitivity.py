@@ -234,108 +234,111 @@ def to_csv(sens: Co2Sensitivity) -> str:
 def to_svg(sens: Co2Sensitivity) -> str:
     """Hand-drawn, deterministic SVG scatter of cost vs CO2 (Pareto highlighted).
 
-    Built as plain XML from the swept numbers -- no plotting library, no RNG and
-    no timestamp, so the committed file is byte-stable across runs.
+    Atlas plate 05: the shared masthead, hairline grid and designed footer come
+    from :mod:`supplynet.atlas`. Built as plain XML from the swept numbers --
+    no plotting library, no RNG and no timestamp, so the committed file is
+    byte-stable across runs.
     """
-    w, h = 640, 420
-    ml, mr, mt, mb = 78, 24, 48, 64  # margins
-    pw, ph = w - ml - mr, h - mt - mb
+    from supplynet import atlas
+
+    w, h = 720, 500
+    ml, mr = 84, 28
+    mt = atlas.HEADER_H
+    pb = 400  # plot baseline (x axis)
+    pw, ph = w - ml - mr, pb - mt
 
     costs = [d.cost for d in sens.designs]
     co2s = [d.co2_t for d in sens.designs]
     cmin, cmax = min(costs), max(costs)
     emin, emax = min(co2s), max(co2s)
-    crange = cmax - cmin or 1.0
-    erange = emax - emin or 1.0
+    cpad = (cmax - cmin or 1.0) * 0.06
+    epad = (emax - emin or 1.0) * 0.08
+    clo, chi = cmin - cpad, cmax + cpad
+    elo, ehi = emin - epad, emax + epad
 
     def px(cost: float) -> float:
-        return ml + pw * (cost - cmin) / crange
+        return ml + pw * (cost - clo) / (chi - clo)
 
     def py(co2: float) -> float:
         # higher CO2 at top
-        return mt + ph * (1.0 - (co2 - emin) / erange)
+        return mt + ph * (1.0 - (co2 - elo) / (ehi - elo))
 
-    parts = [
-        f'<svg xmlns="http://www.w3.org/2000/svg" width="{w}" height="{h}" '
-        f'viewBox="0 0 {w} {h}" font-family="Segoe UI, Arial, sans-serif">',
-        f'<rect width="{w}" height="{h}" fill="#ffffff"/>',
-        f'<text x="{w / 2:.0f}" y="24" text-anchor="middle" font-size="16" '
-        f'font-weight="bold" fill="#1a1a1a">Cost vs CO2 by network density '
-        f'(synthetic; illustrative CO2 factor)</text>',
-        # axes
-        f'<line x1="{ml}" y1="{mt}" x2="{ml}" y2="{mt + ph}" stroke="#333" '
-        f'stroke-width="1.2"/>',
-        f'<line x1="{ml}" y1="{mt + ph}" x2="{ml + pw}" y2="{mt + ph}" '
-        f'stroke="#333" stroke-width="1.2"/>',
-        f'<text x="{ml + pw / 2:.0f}" y="{h - 22}" text-anchor="middle" '
-        f'font-size="12" fill="#333">Total cost ($) - lower is better -&gt;</text>',
-        f'<text x="18" y="{mt + ph / 2:.0f}" text-anchor="middle" font-size="12" '
-        f'fill="#333" transform="rotate(-90 18 {mt + ph / 2:.0f})">'
-        f'Modeled CO2 (t) - lower is better -&gt;</text>',
-    ]
+    parts = atlas.svg_open(w, h)
+    atlas.svg_header(parts, w, 5, "Cost vs CO2 by network density "
+                     "(synthetic; illustrative CO2 factor)")
 
-    # axis end labels
+    # Hairline grid + muted tick labels.
+    atlas.svg_grid_y(parts, atlas.nice_ticks(elo, ehi, 6), py, ml, ml + pw,
+                     lambda t: f"{t:.1f}")
+    atlas.svg_baseline(parts, ml, ml + pw, pb)
+    atlas.svg_ticks_x(parts, atlas.nice_ticks(clo, chi, 5), px, pb, atlas.money)
+
+    # Axis titles.
     parts.append(
-        f'<text x="{ml}" y="{mt + ph + 16}" text-anchor="start" font-size="10" '
-        f'fill="#666">${cmin:,.0f}</text>'
+        f'<text x="{ml + pw / 2:.0f}" y="{pb + 36}" text-anchor="middle" '
+        f'font-size="10.5" fill="{atlas.INK2}">Total cost ($) - lower is better '
+        f'-&gt;</text>'
     )
     parts.append(
-        f'<text x="{ml + pw}" y="{mt + ph + 16}" text-anchor="end" font-size="10" '
-        f'fill="#666">${cmax:,.0f}</text>'
-    )
-    parts.append(
-        f'<text x="{ml - 6}" y="{mt + ph:.0f}" text-anchor="end" font-size="10" '
-        f'fill="#666">{emin:.2f}</text>'
-    )
-    parts.append(
-        f'<text x="{ml - 6}" y="{mt + 8:.0f}" text-anchor="end" font-size="10" '
-        f'fill="#666">{emax:.2f}</text>'
+        f'<text x="20" y="{mt + ph / 2:.0f}" text-anchor="middle" '
+        f'font-size="10.5" fill="{atlas.INK2}" '
+        f'transform="rotate(-90 20 {mt + ph / 2:.0f})">'
+        f'Modeled CO2 (t) - lower is better -&gt;</text>'
     )
 
-    # connect Pareto points (sorted by cost) with a light line
+    # Pareto frontier connector (sorted by cost), under the points.
     pareto = sorted(sens.pareto, key=lambda d: d.cost)
     if len(pareto) >= 2:
         poly = " ".join(f"{px(d.cost):.1f},{py(d.co2_t):.1f}" for d in pareto)
         parts.append(
-            f'<polyline points="{poly}" fill="none" stroke="#1f9d55" '
-            f'stroke-width="1.6" stroke-dasharray="5 3"/>'
+            f'<polyline points="{poly}" fill="none" stroke="{atlas.BLUE}" '
+            f'stroke-opacity="0.6" stroke-width="1.5"/>'
         )
 
+    # Pareto designs wear blue, dominated designs recede to gray; each point
+    # carries a white surface ring and its open-DC count as a direct label.
     cost_opt = sens.cost_optimal
     for d in sens.designs:
         cx, cy = px(d.cost), py(d.co2_t)
-        color = "#1f9d55" if d.is_pareto else "#c44e52"
-        r = 7 if d is cost_opt else 5
+        color = atlas.BLUE if d.is_pareto else atlas.SERIES_GRAY
+        if d is cost_opt:
+            parts.append(
+                f'<circle cx="{cx:.1f}" cy="{cy:.1f}" r="7" fill="{color}" '
+                f'stroke="{atlas.INK}" stroke-width="1.2"/>'
+            )
+        else:
+            parts.append(
+                f'<circle cx="{cx:.1f}" cy="{cy:.1f}" r="5" fill="{color}" '
+                f'stroke="{atlas.PAPER}" stroke-width="2"/>'
+            )
         parts.append(
-            f'<circle cx="{cx:.1f}" cy="{cy:.1f}" r="{r}" fill="{color}" '
-            f'fill-opacity="0.85" stroke="#222" stroke-width="0.8"/>'
-        )
-        parts.append(
-            f'<text x="{cx:.1f}" y="{cy - 9:.1f}" text-anchor="middle" '
-            f'font-size="10" fill="#222">{d.n_dc}</text>'
+            f'<text x="{cx:.1f}" y="{cy - 10:.1f}" text-anchor="middle" '
+            f'font-size="9.5" fill="{atlas.INK2}">{d.n_dc}</text>'
         )
     # mark the cost optimum
     parts.append(
-        f'<text x="{px(cost_opt.cost):.1f}" y="{py(cost_opt.co2_t) + 18:.1f}" '
-        f'text-anchor="middle" font-size="9" fill="#0a4a8b">cost-opt</text>'
+        f'<text x="{px(cost_opt.cost):.1f}" y="{py(cost_opt.co2_t) + 19:.1f}" '
+        f'text-anchor="middle" font-size="9" fill="{atlas.INK2}">cost-opt</text>'
     )
 
-    # legend
-    ly = mt + 6
+    # Legend (top-right of the plot, where the frontier leaves whitespace).
+    lx, ly = ml + pw - 118, mt + 12
     parts.append(
-        f'<circle cx="{ml + pw - 150}" cy="{ly}" r="5" fill="#1f9d55"/>'
-        f'<text x="{ml + pw - 140}" y="{ly + 4}" font-size="10" fill="#333">'
+        f'<circle cx="{lx}" cy="{ly}" r="5" fill="{atlas.BLUE}" '
+        f'stroke="{atlas.PAPER}" stroke-width="2"/>'
+        f'<text x="{lx + 11}" y="{ly + 4}" font-size="10" fill="{atlas.INK2}">'
         f'Pareto-optimal</text>'
     )
-    parts.append(
-        f'<circle cx="{ml + pw - 150}" cy="{ly + 16}" r="5" fill="#c44e52"/>'
-        f'<text x="{ml + pw - 140}" y="{ly + 20}" font-size="10" fill="#333">'
-        f'dominated</text>'
-    )
-    parts.append(
-        '<text x="'
-        f'{ml}" y="{h - 6}" font-size="9" fill="#999">Point label = number of '
-        'open DCs. Synthetic, seeded data; CO2 factor illustrative.</text>'
-    )
-    parts.append("</svg>")
-    return "\n".join(parts) + "\n"
+    if any(not d.is_pareto for d in sens.designs):
+        parts.append(
+            f'<circle cx="{lx}" cy="{ly + 18}" r="5" fill="{atlas.SERIES_GRAY}" '
+            f'stroke="{atlas.PAPER}" stroke-width="2"/>'
+            f'<text x="{lx + 11}" y="{ly + 22}" font-size="10" '
+            f'fill="{atlas.INK2}">dominated</text>'
+        )
+
+    atlas.svg_footer(parts, w, h, [
+        "Point label = number of open DCs. Synthetic, seeded data; "
+        "CO2 factor illustrative."
+    ])
+    return atlas.svg_close(parts)
